@@ -7,8 +7,7 @@ import threading
 from dataclasses import dataclass, field
 from pathlib import Path
 
-from adjudicate import (Cache, Change, ReviewItem, Skipped, apply_changes, compose,
-                        protected_spans)
+from adjudicate import Cache, Change, ReviewItem, Skipped, compose
 from proofix import api as proof
 from proofix.commas import CommaCache
 from stylefix import api as style
@@ -89,10 +88,6 @@ class FileResult:
     skipped: list[Skipped] = field(default_factory=list)
 
 
-def _touches(c: Change, spans: list[tuple[int, int]]) -> bool:
-    return any(c.start < e and c.end > s or s < c.start < e for s, e in spans)
-
-
 def process(label: str, text: str, settings: Settings, endpoint, caches: Caches,
             replay: bool, parallel: int = 4) -> FileResult:
     if settings.off:
@@ -116,12 +111,6 @@ def process(label: str, text: str, settings: Settings, endpoint, caches: Caches,
                       endpoint, caches.cache)
         middle, first = r.text, r.changes
         review, skipped = review + r.review, skipped + r.skipped
-        # Vale does not know Obsidian syntax: drop any change that touches a protected span.
-        spans = protected_spans(body)
-        kept = [c for c in first if not _touches(c, spans)]
-        if len(kept) != len(first):
-            first = kept
-            middle = apply_changes(body, first)
     final, second = middle, []
     if "proof" in settings.only:
         r2 = proof.fix(middle, proof.Options(target=settings.target, accept=frozenset(proof_accept),

@@ -61,3 +61,8 @@ def test_shared_cache_written_once_and_valid(tmp_path):
     assert not (tmp_path / ".prosefix" / "cache.json").exists()   # nothing written mid-run
     caches.flush()
     json.loads((tmp_path / ".prosefix" / "cache.json").read_text())
+
+
+def test_dash_survives_next_to_protected_quotes():
+    r = run('Read "#draft" and "$x$" -- now.\n', target="us")
+    assert r.output == "Read “#draft” and “$x$”—now.\n"

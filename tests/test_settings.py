@@ -110,10 +110,26 @@ def test_cache_and_accept_file_stay_inside_the_project(tmp_path, key, value):
     (outside / "words.txt").write_text("a\n")
     (tmp_path / "proj").mkdir()
     (tmp_path / "proj" / "link").symlink_to(outside)
-    with pytest.raises(SettingsError, match=key):
+    with pytest.raises(SettingsError, match=f"{key} must be a path inside"):
         _resolve_in(tmp_path, f'{key} = "{value}"\n')
 
 
 def test_relative_cache_inside_the_project_works(tmp_path):
     s = _resolve_in(tmp_path, 'cache = "sub/c.json"\n')
     assert s.cache == tmp_path / "proj" / "sub" / "c.json"
+
+
+def test_default_cache_dir_symlinked_outside_is_refused(tmp_path):
+    (tmp_path / "proj").mkdir()
+    (tmp_path / "out").mkdir()
+    (tmp_path / "proj" / ".prosefix").symlink_to(tmp_path / "out")
+    with pytest.raises(SettingsError, match="must be a path inside"):
+        _resolve_in(tmp_path, 'target = "us"\n')
+
+
+def test_commas_file_symlinked_outside_is_refused(tmp_path):
+    (tmp_path / "proj" / "c").mkdir(parents=True)
+    (tmp_path / "out.json").write_text("{}")
+    (tmp_path / "proj" / "c" / "commas.json").symlink_to(tmp_path / "out.json")
+    with pytest.raises(SettingsError, match="must be a path inside"):
+        _resolve_in(tmp_path, 'cache = "c/cache.json"\n')

@@ -161,12 +161,19 @@ def resolve(path: Path | None, text: str, flags: dict, project: Project) -> Sett
         accept += _read_accept_file(project, v["accept_file"])
     if "cache" in v and project.root:
         cache = _inside(project, "cache", v["cache"])
+        allowed = project.root
     elif "cache" in v:                     # only from a flag or note: relative to the working directory
         cache = Path.cwd() / v["cache"]
+        allowed = Path.cwd()
     elif project.root:
-        cache = project.root / ".prosefix" / "cache.json"
+        cache, allowed = project.root / ".prosefix" / "cache.json", project.root
     else:
-        cache = Path(os.environ.get("XDG_CACHE_HOME") or Path.home() / ".cache") / "prosefix" / "cache.json"
+        allowed = Path(os.environ.get("XDG_CACHE_HOME") or Path.home() / ".cache")
+        cache = allowed / "prosefix" / "cache.json"
+    for f in (cache, cache.with_name("commas.json")):      # every file prosefix will write
+        if not f.resolve().is_relative_to(allowed.resolve()):
+            raise SettingsError(f"{project.source or 'settings'}: cache file {f} must be a path inside "
+                                f"{allowed}, not a link to {f.resolve()}")
     return Settings(target=v["target"], style=v.get("style"),
                     only=tuple(v.get("only", PASSES)), skip=frozenset(v.get("skip", ())),
                     exclude=tuple(v.get("exclude", ())), accept=tuple(accept),
