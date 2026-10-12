@@ -25,15 +25,19 @@ SKIP_DIRS = {".git", ".obsidian", "node_modules"}
 EXTS = {".md", ".markdown"}
 
 DESCRIPTION = """\
-Clean, consistent prose in Markdown: stylefix's spelling and style guide, then
-proofix's typos, punctuation and commas, in one pass. Files and directories are
-rewritten in place; - reads stdin and writes stdout. Front matter, code, links,
-HTML and Obsidian syntax are never changed."""
+prosefix fixes spelling, style, typos and punctuation in Markdown files, in place.
+
+  prosefix draft.md
+  prosefix draft.md --diff
+  prosefix vault/ --check"""
 
 EPILOG = """\
-examples:
+prosefix runs stylefix's spelling and style guide, then proofix's typos,
+punctuation and commas, in one pass. - reads stdin and writes stdout. Front
+matter, code, links, HTML and Obsidian syntax are never changed.
+
+more examples:
   prosefix --setup                      choose and test a model endpoint
-  prosefix note.md                      rewrite one note in place
   prosefix vault/ --diff                show what would change in a vault
   prosefix content/ --check --llm cached   CI: fail if anything would change
   prosefix - < in.md > out.md           filter
@@ -217,15 +221,37 @@ def _doctor(args) -> int:
     return 0
 
 
-def _change_line(label: str, line: int, c) -> str:
+_CONTEXT = 12
+
+
+def _window(text: str, start: int, end: int) -> tuple[str, str]:
+    """Up to _CONTEXT characters either side of text[start:end], cut back to word boundaries."""
+    lo, hi = max(0, start - _CONTEXT), min(len(text), end + _CONTEXT)
+    left, right = text[lo:start], text[end:hi]
+    if lo > 0 and not text[lo - 1].isspace() and left and not left[0].isspace():
+        left = re.sub(r"^\S+", "", left).lstrip()
+    if hi < len(text) and not text[hi].isspace() and right and not right[-1].isspace():
+        right = re.sub(r"\S+$", "", right).rstrip()
+    return left, right
+
+
+def _change_line(label: str, line: int, c, text: str) -> str:
     extra = f", {c.reason}" if c.reason else ""
-    return (f"{label}:{line}: {c.before!r} -> {c.after!r}  "
+    left, right = _window(text, c.start, c.end)
+
+    def show(mid: str) -> str:
+        return (left + mid + right).replace("\r\n", "\u23ce").replace("\n", "\u23ce")
+    return (f"{label}:{line}: {show(c.before)!r} -> {show(c.after)!r}  "
             f"[{c.pass_} {c.check}, {c.decided_by}{extra}]")
+
+
+def _review_line(label: str, item) -> str:
+    return f"{label}:{item.line}: review \u2014 {item.message} [{item.pass_} {item.check}]"
 
 
 def _lines(r):
     for c in r.changes:
-        yield _change_line(r.path, r.original.count("\n", 0, c.start) + 1, c)
+        yield _change_line(r.path, r.original.count("\n", 0, c.start) + 1, c, r.original)
 
 
 def _unified_diff(a: str, b: str, label: str):
@@ -238,6 +264,14 @@ def _unified_diff(a: str, b: str, label: str):
             yield line + "\n\\ No newline at end of file\n"
 
 
+def _shown_review(r):
+    return [] if r.status == "error" else r.review
+
+
+def _tip(path: str) -> None:
+    print(f"tip: prosefix --diff {path} shows changes without writing them", file=sys.stderr)
+
+
 def _variety_note(s) -> str:
     """Says which variety was assumed when the user did not set one."""
     if s.target_source == "detected":
@@ -246,6 +280,16 @@ def _variety_note(s) -> str:
         return (f"no clear variety ({s.detected[0]} UK, {s.detected[1]} US words); using en-US "
                 "\u2014 set --target or lang: \u00b7 ")
     return ""
+
+
+def _no_cache_yet(job: Job, flags) -> bool:
+    """True when the cache file that applies to this input does not exist yet."""
+    try:
+        text = job.path.read_text(encoding="utf-8")
+        cache = resolve(job.lookup, text, flags, find_project(job.lookup)).cache
+    except (OSError, UnicodeDecodeError, SettingsError):
+        return False
+    return cache is not None and not cache.exists()
 
 
 def main(argv=None) -> int:
@@ -346,6 +390,11 @@ def main(argv=None) -> int:
             msg = f"{type(e).__name__}: {e}"
             return engine.FileResult(job.label, "error", msg, settings, text, text)
 
+    first_run = False
+    if not (args.quiet or args.json or args.diff or args.check or args.output) and jobs \
+            and all(j.path is not None for j in jobs):
+        first_run = _no_cache_yet(jobs[0], flags)
+
     try:
         with ThreadPoolExecutor(max_workers=max(1, args.jobs)) as pool:
             results = list(pool.map(run, jobs))
@@ -363,15 +412,29 @@ def main(argv=None) -> int:
     for r in results:
         for s in r.skipped:
             skipped.setdefault(s.what, s)
-    if ep is None and args.llm != "none":
+    model_line = None
+    if ep is None and args.llm not in ("none", "cached"):
+        model_line = "model decisions and comma placement need a model \u2014 prosefix --setup"
+    elif args.llm == "cached" and ep is None:
+        model_line = ("skipped model decisions and comma placement "
+                      "(only cached decisions are used: run without --llm cached)")
+    skipped_list = list(skipped.values())
+    if model_line:
         why, fix = (("only cached decisions are used", "run without --llm cached")
                     if args.llm == "cached" else ("no model endpoint", "prosefix --setup"))
-        s = Skipped("model decisions and comma placement", why, fix)
-        skipped.setdefault(s.what, s)
-    skipped_list = list(skipped.values())
+        skipped_list.append(Skipped("model decisions and comma placement", why, fix))
+    missing = [s.fix.split()[-1] for s in skipped.values() if s.fix.startswith("brew install ")]
+    missing.sort(key=lambda n: ("vale", "languagetool", "typos-cli").index(n)
+                 if n in ("vale", "languagetool", "typos-cli") else 9)
     if not (args.quiet or args.json):
-        for s in skipped_list:
-            _err(f"skipped {s.what} ({s.why}: {s.fix})")
+        if missing:
+            _err("most fixes need Vale and LanguageTool \u2014 brew install andrewbroz/tap/prosefix "
+                 f"(or: brew install {' '.join(missing)})")
+        for s in skipped.values():
+            if not s.fix.startswith("brew install "):
+                _err(f"skipped {s.what} ({s.why}: {s.fix})")
+        if model_line:
+            _err(model_line)
 
     changed = [r for r in results if r.status == "changed"]
     reviewed = [r for r in results if r.review]
@@ -379,6 +442,8 @@ def main(argv=None) -> int:
         for r in results:
             for line in _lines(r):
                 print(line, file=sys.stderr)
+            for i in _shown_review(r):
+                print(_review_line(r.path, i), file=sys.stderr)
     if args.report:
         try:
             with open(args.report, "w", encoding="utf-8") as fh:
@@ -433,6 +498,14 @@ def main(argv=None) -> int:
                 if r.status in ("changed",) or (r.review and r.status != "error"):
                     print(f"prosefix: {r.path}: {_variety_note(r.settings)}{len(r.changes)} change(s), "
                           f"{len(r.review)} for review", file=out)
+            n_review = sum(len(r.review) for r in results)
+            single = len(jobs) == 1
+            hint = " (--changes lists them)" if n_review and not single and not args.changes else ""
             print(f"prosefix: {len(changed)} file(s) changed, {n_changes} change(s), "
-                  f"{sum(len(r.review) for r in results)} for review", file=out)
+                  f"{n_review} for review{hint}", file=out)
+            if single and not args.changes:
+                for i in _shown_review(results[0]):
+                    print(_review_line(results[0].path, i), file=sys.stderr)
+            if first_run:
+                _tip(jobs[0].label)
     return 2 if failed else 0

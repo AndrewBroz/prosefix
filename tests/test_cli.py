@@ -110,7 +110,7 @@ def test_missing_tools_degrade_and_require(note, monkeypatch, capsys):
     monkeypatch.setenv("PATH", "/nonexistent")
     assert main([str(note), "--llm", "none"]) == 0
     err = capsys.readouterr().err
-    assert err.count("skipped") >= 1 and "brew install vale" in err
+    assert "most fixes need Vale and LanguageTool" in err and "vale" in err
     assert main([str(note), "--llm", "none", "--require", "vale"]) == 2
 
 
@@ -331,3 +331,99 @@ def test_json_target_source(tmp_path, capsys):
     main([str(p), "--json", "--llm", "none"])
     s = json.loads(capsys.readouterr().out)["files"][0]["settings"]
     assert s["target_source"] == "detected" and s["detected"]["uk"] >= 2
+
+
+def test_single_file_prints_review_items(tmp_path, capsys):
+    p = tmp_path / "n.md"
+    p.write_text("I had had enough of it.\n")
+    main([str(p), "--llm", "none", "--target", "us"])
+    cap = capsys.readouterr()
+    assert "review —" in cap.err and "[proofix" in cap.err and f"{p}:1:" in cap.err
+
+
+def test_many_files_hint_instead_of_items(tmp_path, capsys):
+    for n in "ab":
+        (tmp_path / f"{n}.md").write_text("I had had enough of it.\n")
+    main([str(tmp_path), "--llm", "none", "--target", "us"])
+    cap = capsys.readouterr()
+    assert "review —" not in cap.err + cap.out and "(--changes lists them)" in cap.out
+
+
+def test_changes_lists_review_after_changes(tmp_path, capsys):
+    p = tmp_path / "n.md"
+    p.write_text("The color is here. I had had enough of it.\n")
+    main([str(p), "--llm", "none", "--target", "uk", "--changes"])
+    err = capsys.readouterr().err
+    assert err.index("->") < err.index("review —")
+
+
+def test_change_line_has_context_window():
+    from types import SimpleNamespace as NS
+    from prosefix.cli import _change_line
+    text = "Everything about the programme , which covers analysis and design and testing."
+    start = text.index(" ,")
+    c = NS(start=start, end=start + 2, before=" ,", after=",", pass_="proofix", check="C",
+           decided_by="rule", reason="")
+    line = _change_line("f.md", 1, c, text)
+    assert "'programme , which' -> 'programme, which'" in line
+    nl = "end of a sentence.\ncolour here and more words"
+    s = nl.index("colour")
+    c = NS(start=s, end=s + 6, before="colour", after="color", pass_="stylefix", check="C",
+           decided_by="rule", reason="")
+    assert "sentence.\u23cecolour here" in _change_line("f.md", 2, c, nl)
+
+
+def test_one_tools_line_and_one_model_line(tmp_path, capsys, monkeypatch):
+    monkeypatch.setenv("PATH", "/nonexistent")
+    p = tmp_path / "n.md"
+    p.write_text("The the end.\n")
+    main([str(p), "--llm", "auto", "--target", "us"])
+    err = capsys.readouterr().err
+    assert err.count("most fixes need Vale and LanguageTool") == 1
+    assert "brew install vale languagetool typos-cli" in err
+    assert err.count("need a model — prosefix --setup") == 1
+    assert "skipped" not in err
+
+
+def test_llm_none_prints_no_model_line(tmp_path, capsys, monkeypatch):
+    monkeypatch.setenv("PATH", "/nonexistent")
+    p = tmp_path / "n.md"
+    p.write_text("The the end.\n")
+    main([str(p), "--llm", "none", "--target", "us"])
+    err = capsys.readouterr().err
+    assert "need a model" not in err and "most fixes need" in err
+
+
+def test_quiet_prints_no_tools_model_or_tip(tmp_path, capsys, monkeypatch):
+    monkeypatch.setenv("PATH", "/nonexistent")
+    p = tmp_path / "n.md"
+    p.write_text("The the end.\n")
+    main([str(p), "-q", "--target", "us"])
+    assert capsys.readouterr().err == ""
+
+
+def test_first_run_tip_once(tmp_path, capsys):
+    p = tmp_path / "n.md"
+    p.write_text("The color -- here.\n")
+    main([str(p), "--llm", "none"])
+    assert "tip: prosefix --diff" in capsys.readouterr().err
+    main([str(p), "--llm", "none", "-q"])
+    assert "tip:" not in capsys.readouterr().err
+
+
+def test_no_tip_in_check_diff_json_stdin_output(tmp_path, capsys, monkeypatch):
+    p = tmp_path / "n.md"
+    p.write_text("The color -- here.\n")
+    for extra in (["--check"], ["--diff"], ["--json"], ["-o", str(tmp_path / "o.md")]):
+        main([str(p), "--llm", "none", *extra])
+        assert "tip:" not in capsys.readouterr().err, extra
+    monkeypatch.setattr("sys.stdin", io.StringIO("The color -- here.\n"))
+    main(["-", "--llm", "none"])
+    assert "tip:" not in capsys.readouterr().err
+
+
+def test_help_opens_plainly(capsys):
+    with pytest.raises(SystemExit):
+        main(["--help"])
+    head = capsys.readouterr().out.split("\n\n")[1]
+    assert head.startswith("prosefix fixes spelling, style, typos and punctuation in Markdown files, in place.")
