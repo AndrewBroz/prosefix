@@ -146,3 +146,34 @@ def test_unknown_style_names_the_key_and_the_known_guides(tmp_path, where):
             resolve(tmp_path / "n.md", "x\n", {}, proj(tmp_path, 'style = "nope"\n'))
         else:
             resolve(tmp_path / "n.md", "---\nprosefix: {style: nope}\n---\nx\n", {}, proj(tmp_path, ""))
+
+
+UK = "The colour scheme and the programme. Finalise the licence.\n"
+US = "The color scheme and the program. Finalize the license.\n"
+
+
+def test_detected_when_nothing_sets_a_target(tmp_path):
+    p = proj(tmp_path, "")
+    s = resolve(tmp_path / "n.md", UK, {}, p)
+    assert (s.target, s.target_source) == ("uk", "detected") and s.detected[0] >= 2
+
+
+def test_default_when_unclear(tmp_path):
+    s = resolve(tmp_path / "n.md", "Plain words only.\n", {}, proj(tmp_path, ""))
+    assert (s.target, s.target_source, s.detected) == ("us", "default", (0, 0))
+
+
+@pytest.mark.parametrize("body, flags, front, want", [
+    ("", {"target": "us"}, "", ("us", "flag")),
+    ('target = "us"\n', {}, "", ("us", "project")),
+    ("", {}, "---\nprosefix: {target: us}\n---\n", ("us", "front matter")),
+    ("", {}, "---\nlang: en-US\n---\n", ("us", "lang")),
+])
+def test_explicit_targets_beat_detection(tmp_path, body, flags, front, want):
+    s = resolve(tmp_path / "n.md", front + UK, flags, proj(tmp_path, body))
+    assert (s.target, s.target_source) == want and s.detected is None
+
+
+def test_project_target_beats_detection(tmp_path):
+    s = resolve(tmp_path / "n.md", UK, {}, proj(tmp_path, 'target = "us"\n'))
+    assert (s.target, s.target_source) == ("us", "project")

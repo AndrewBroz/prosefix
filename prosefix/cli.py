@@ -238,6 +238,16 @@ def _unified_diff(a: str, b: str, label: str):
             yield line + "\n\\ No newline at end of file\n"
 
 
+def _variety_note(s) -> str:
+    """Says which variety was assumed when the user did not set one."""
+    if s.target_source == "detected":
+        return f"{'en-GB' if s.target == 'uk' else 'en-US'} (detected) \u00b7 "
+    if s.target_source == "default" and s.detected is not None:
+        return (f"no clear variety ({s.detected[0]} UK, {s.detected[1]} US words); using en-US "
+                "\u2014 set --target or lang: \u00b7 ")
+    return ""
+
+
 def main(argv=None) -> int:
     global _UMASK
     _UMASK = _read_umask()
@@ -421,8 +431,9 @@ def main(argv=None) -> int:
             out = sys.stderr if any(j.path is None for j in jobs) else sys.stdout
             for r in results:
                 if r.status in ("changed",) or (r.review and r.status != "error"):
-                    print(f"prosefix: {r.path}: {len(r.changes)} change(s), {len(r.review)} for review",
-                          file=out)
+                    note = _variety_note(r.settings)       # an assumption made for the user goes to stderr
+                    print(f"prosefix: {r.path}: {note}{len(r.changes)} change(s), "
+                          f"{len(r.review)} for review", file=sys.stderr if note else out)
             print(f"prosefix: {len(changed)} file(s) changed, {n_changes} change(s), "
                   f"{sum(len(r.review) for r in results)} for review", file=out)
     return 2 if failed else 0

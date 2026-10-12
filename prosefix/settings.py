@@ -46,6 +46,8 @@ class Settings:
     project: Path | None = None
     off: bool = False
     note: str | None = None
+    target_source: str = "default"
+    detected: tuple[int, int] | None = None       # (uk, us) word counts, when detection ran
 
 
 def _validate(table, where: str, allowed: tuple[str, ...]) -> dict:
@@ -143,8 +145,9 @@ def _read_accept_file(project: Project, name: str) -> list[str]:
 
 
 def resolve(path: Path | None, text: str, flags: dict, project: Project) -> Settings:
-    v: dict = {"target": "us"}
+    v: dict = {}
     v.update(project.values)
+    source = "project" if "target" in v else None
     fm, note = front_matter(text)
     off = False
     if fm is not None:
@@ -154,18 +157,28 @@ def resolve(path: Path | None, text: str, flags: dict, project: Project) -> Sett
             off = True
         elif isinstance(p, dict):
             v.update(_validate(p, where, _NOTE_KEYS))
+            if "target" in p:
+                source = "front matter"
         elif p is not None:
             raise SettingsError(f"{where} must be off or a mapping, not {p!r}")
         if not (isinstance(p, dict) and "target" in p):
             lang = str(fm.get("lang", "")).strip().lower()
             if lang in ("en-gb", "en-uk"):
-                v["target"] = "uk"
+                v["target"], source = "uk", "lang"
             elif lang == "en-us":
-                v["target"] = "us"
+                v["target"], source = "us", "lang"
     v.update({k: val for k, val in flags.items() if val is not None})
+    if flags.get("target") is not None:
+        source = "flag"
     accept = list(v.get("accept", []))
     if project.root and "accept_file" in v:
         accept += _read_accept_file(project, v["accept_file"])
+    detected = None
+    if source is None:
+        from stylefix.api import detect_variety
+        d = detect_variety(FRONT.sub("", text, count=1), accept=accept)
+        v["target"], detected = d.target or "us", (d.uk, d.us)
+        source = "detected" if d.target else "default"
     if "cache" in v and project.root:
         cache = _inside(project, "cache", v["cache"])
         allowed = project.root
@@ -185,4 +198,5 @@ def resolve(path: Path | None, text: str, flags: dict, project: Project) -> Sett
                     only=tuple(v.get("only", PASSES)), skip=frozenset(v.get("skip", ())),
                     exclude=tuple(v.get("exclude", ())), accept=tuple(accept),
                     cache=cache,
-                    project=project.source, off=off, note=note)
+                    project=project.source, off=off, note=note,
+                    target_source=source, detected=detected)

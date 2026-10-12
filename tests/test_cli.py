@@ -308,3 +308,19 @@ def test_decisions_are_saved_when_the_run_is_interrupted(tmp_path):
         main([str(p), "--llm", "cached"])
     assert json.loads((tmp_path / ".prosefix" / "cache.json").read_text()) == {
         "k": {"word": "color", "choice": "colour"}}
+
+
+def test_detected_variety_is_reported_and_kept(tmp_path, capsys):
+    p = tmp_path / "n.md"
+    p.write_text("The colour scheme and the programme -- finalise the licence.\n")
+    assert main([str(p), "--llm", "none"]) == 0
+    assert "colour" in p.read_text() and "programme" in p.read_text()
+    assert "en-GB (detected)" in capsys.readouterr().err
+
+
+def test_json_target_source(tmp_path, capsys):
+    p = tmp_path / "n.md"
+    p.write_text("The colour scheme and the programme.\n")
+    main([str(p), "--json", "--llm", "none"])
+    s = json.loads(capsys.readouterr().out)["files"][0]["settings"]
+    assert s["target_source"] == "detected" and s["detected"]["uk"] >= 2

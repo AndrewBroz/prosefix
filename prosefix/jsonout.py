@@ -17,7 +17,9 @@ def file_entry(r) -> dict:
     s = r.settings
     entry = {"path": r.path, "status": r.status, "reason": r.reason,
              "settings": {"target": s.target, "style": s.style, "only": list(s.only),
-                          "skip": sorted(s.skip)}}
+                          "skip": sorted(s.skip), "target_source": s.target_source}}
+    if s.detected is not None:
+        entry["settings"]["detected"] = {"uk": s.detected[0], "us": s.detected[1]}
     if r.status == "error":
         return entry
     m = utf16_offsets(r.original)

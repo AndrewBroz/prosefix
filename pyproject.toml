@@ -7,7 +7,7 @@ requires-python = ">=3.11"
 license = "MIT"
 license-files = ["LICENSE"]
 authors = [{ name = "Andrew Brož" }]
-dependencies = ["adjudicate>=0.3.1,<0.4", "stylefix>=0.8,<0.9", "proofix>=0.6,<0.7", "pyyaml>=6"]
+dependencies = ["adjudicate>=0.3.2,<0.4", "stylefix>=0.8.1,<0.9", "proofix>=0.7,<0.8", "pyyaml>=6"]
 classifiers = [
     "Development Status :: 3 - Alpha",
     "Environment :: Console",
