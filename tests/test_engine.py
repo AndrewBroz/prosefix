@@ -1,7 +1,9 @@
 import json
+import shutil
 import threading
 from pathlib import Path
 
+import pytest
 from adjudicate import apply_changes
 from prosefix import engine
 from prosefix.settings import Settings
@@ -93,14 +95,33 @@ def test_second_pass_labels_restyle_and_proofix_changes():
     assert all(c.pass_ in ("stylefix", "proofix") and "\x00" not in c.check for c in out)
 
 
-def test_byte_order_mark_before_front_matter_keeps_the_head(tmp_path):
+_BOM_HEAD = "\ufeff---\ntitle: Color program -- draft\nprosefix: {target: uk}\n---\n"
+
+
+def _bom_note(tmp_path):
     from prosefix.settings import find_project, resolve
-    head = "\ufeff---\ntitle: Color program -- draft\nprosefix: {target: uk}\n---\n"
-    text = head + "\nThe color program -- ok.\n"
+    text = _BOM_HEAD + "\nThe color program -- ok.\n"
     s = resolve(tmp_path / "n.md", text, {}, find_project(tmp_path / "n.md"))
+    return text, s, engine.process("n.md", text, s, None, engine.caches_for(s, "off"), replay=False)
+
+
+def test_byte_order_mark_before_front_matter_keeps_the_head_without_tools(tmp_path):
+    # Needs no external tool: the dash is stylefix's own punctuation pass, so this
+    # runs (and must pass) on the CI jobs without vale, languagetool or typos.
+    text, s, r = _bom_note(tmp_path)
     assert s.target == "uk"                        # the front matter is read
-    r = engine.process("n.md", text, s, None, engine.caches_for(s, "off"), replay=False)
-    assert r.output.startswith(head) and "The colour program" in r.output
+    assert r.output.startswith(_BOM_HEAD)          # BOM and front matter byte for byte
+    body = r.output[len(_BOM_HEAD):]               # the body is still fixed (colour only with vale)
+    assert body in ("\nThe color program \u2013 ok.\n", "\nThe colour program \u2013 ok.\n")
+    assert all(c.start >= len(_BOM_HEAD) for c in r.changes)
+    assert apply_changes(text, r.changes) == r.output
+
+
+@pytest.mark.skipif(not shutil.which("vale"), reason="variety spelling needs vale")
+def test_byte_order_mark_before_front_matter_keeps_the_head(tmp_path):
+    text, s, r = _bom_note(tmp_path)
+    assert s.target == "uk"
+    assert r.output.startswith(_BOM_HEAD) and "The colour program" in r.output
     assert apply_changes(text, r.changes) == r.output
 
 
@@ -133,8 +154,6 @@ def _have_tools():
     import shutil
     return shutil.which("vale") and (shutil.which("languagetool") or shutil.which("languagetool-commandline"))
 
-
-import pytest  # noqa: E402
 
 SAMPLES = [Path(__file__).parent.parent.parent / "stylefix" / "examples" / "sample.md",
            Path(__file__).parent.parent.parent / "proofix" / "examples" / "typos.md"]
