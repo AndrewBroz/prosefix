@@ -315,7 +315,14 @@ def test_detected_variety_is_reported_and_kept(tmp_path, capsys):
     p.write_text("The colour scheme and the programme -- finalise the licence.\n")
     assert main([str(p), "--llm", "none"]) == 0
     assert "colour" in p.read_text() and "programme" in p.read_text()
-    assert "en-GB (detected)" in capsys.readouterr().err
+    assert "en-GB (detected)" in capsys.readouterr().out
+
+
+def test_detected_variety_label_is_on_stderr_for_stdin(monkeypatch, capsys):
+    monkeypatch.setattr("sys.stdin", io.StringIO("The colour scheme and the programme -- finalise the licence.\n"))
+    assert main(["-", "--llm", "none"]) == 0
+    cap = capsys.readouterr()
+    assert "en-GB (detected)" in cap.err and "detected" not in cap.out
 
 
 def test_json_target_source(tmp_path, capsys):
