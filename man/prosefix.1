@@ -1,0 +1,508 @@
+.TH PROSEFIX 1 "October 2026" "prosefix 0.1.0" "User Commands"
+.SH NAME
+prosefix \- clean, consistent prose in Markdown: spelling, style, typos, punctuation and commas in one command
+.SH SYNOPSIS
+.B prosefix
+.RI [ options ]
+.IR PATH ...
+.br
+.B prosefix
+.RI [ options ]
+.B \-
+< in.md
+.br
+.B prosefix
+.BR \-\-setup " | " \-\-check\-endpoint " | " \-\-doctor
+.SH DESCRIPTION
+.B prosefix
+makes Markdown read as clean, consistent prose. For each file it runs two
+passes in one process, with one model endpoint, one decision cache and one
+change list. The
+.B style
+pass is stylefix's: one English variety (US or UK) and one style guide (spelling,
+serial comma, numerals, abbreviations, dashes, quotes, apostrophes, ranges).
+The
+.B proof
+pass is proofix's: line-ending and whitespace hygiene, mechanical errors, typos,
+model-adjudicated fixes, compound words and comma placement.
+.PP
+Each
+.I PATH
+is a file, a directory or
+.BR \- .
+Files are rewritten
+.B in place
+(atomically, keeping the file's mode; a symbolic link is kept and its target
+is updated; a read-only file is reported and left alone). A directory is
+walked for
+.I *.md
+and
+.I *.markdown
+files, skipping
+.IR .git ,
+.IR .obsidian ,
+.IR node_modules ,
+every other directory whose name starts with a dot, and the project's
+.B exclude
+globs. Files named on the command line are always processed.
+.B \-
+reads standard input and writes the result to standard output.
+.PP
+Never changed: YAML front matter, fenced and inline code, link and image
+targets, URLs, HTML, and Obsidian syntax (wikilinks and their aliases,
+embeds, #tags, %%comments%%, ^block\-ids, the
+.I > [!type]
+marker of a callout, and $maths$). Quotation marks beside protected text are
+curled according to their real neighbours. Prose that only resembles such
+syntax (issue #42, C#, "costs $5 and $10", a "# Heading") is edited as prose.
+.PP
+prosefix is idempotent (a second run over its own output changes nothing),
+faithful (applying every reported change to the original gives the output
+exactly) and bounded (only prose changes).
+.PP
+Any per-file error (unreadable, not UTF\-8, not writable, bad settings) is
+reported on standard error and makes the exit status 2; other files are
+still processed. In stdin mode the text is always written to standard
+output, the original if the file failed.
+.SH OPTIONS
+.SS Input and output
+.TP
+.IR PATH ...
+Files, directories, or
+.B \-
+for standard input.
+.TP
+.BR \-o ", " \-\-output " " \fIFILE\fR
+Write one input file's result to
+.I FILE
+instead of in place. Takes exactly one input file.
+.TP
+.B \-\-stdin\-filename \fIPATH\fR
+With
+.BR \- ,
+the path used for settings lookup, for
+.B exclude
+matching and as
+.B path
+in
+.BR \-\-json .
+Editors pass the note's real path this way. Without it, settings are looked up from the current directory.
+.TP
+.B \-\-diff
+Print a unified diff and write nothing.
+.TP
+.B \-\-check
+Write nothing. List the files that would change and exit 1 if there are any. Does not fail merely because no model was available.
+.TP
+.B \-\-json
+Print the proposals as one JSON document (schema 1, see
+.BR JSON )
+and write nothing.
+.PP
+.BR \-\-diff ,
+.B \-\-check
+and
+.B \-\-json
+exclude one another.
+.TP
+.B \-\-strict
+With
+.BR \-\-check ,
+files that have review items also count (exit 1). It is an error without
+.BR \-\-check .
+.SS What to do
+.TP
+.BR \-\-target " " {us|uk}
+English variety. Default
+.BR us .
+.TP
+.B \-\-style \fIGUIDE\fR
+Style guide, as stylefix's
+.BR \-\-style .
+.TP
+.BR \-\-only " " {style|proof}
+Run one pass only.
+.TP
+.B \-\-skip \fITIER\fR,...
+Comma-separated tiers to skip; see
+.BR TIERS .
+An unknown name is an error.
+.SS Model
+.TP
+.BR \-\-llm " " {auto|ollama|none|cached}
+.B auto
+(the default): the configured endpoint, else local Ollama.
+.B ollama:
+local Ollama.
+.B cached:
+apply decisions already in the cache and never contact a model; items not in
+the cache are left as written and reported.
+.B none:
+rules only; the cache is ignored.
+.TP
+.B \-\-url \fIURL\fR
+OpenAI-compatible base URL. Overrides every configured url; see
+.BR ENVIRONMENT .
+.TP
+.B \-\-model \fINAME\fR
+Model name at the endpoint.
+.TP
+.B \-\-timeout \fISEC\fR
+Seconds per model request.
+.TP
+.B \-\-no\-cache
+Neither read nor write the decision cache.
+.TP
+.B \-\-require \fITOOL\fR,...
+Exit 2 if any of
+.BR vale ,
+.BR languagetool ,
+.B typos
+or
+.B model
+is missing, instead of skipping what needs it.
+.SS Reporting
+.TP
+.B \-\-changes
+Print every change to standard error, one per line.
+.TP
+.B \-\-report \fIFILE\fR
+Write one Markdown report covering all files.
+.TP
+.BR \-q ", " \-\-quiet
+Only errors on standard error: no summary, no "skipped" lines.
+.TP
+.BR \-j ", " \-\-jobs " " \fIN\fR
+Files processed in parallel. Default 4. Workers share one in-memory cache,
+written once when the run ends.
+.SS Configuration
+These exit without processing input.
+.TP
+.B \-\-setup
+Choose, test and save a model endpoint (the shared adjudicate setup, for
+prosefix).
+.TP
+.B \-\-check\-endpoint
+Show the endpoint prosefix would use, where each setting came from, and test it.
+.TP
+.B \-\-doctor
+Show which of Vale, LanguageTool and typos were found (or are missing, with the
+command to install them), the endpoint check, and the settings file that
+applies to the current directory. Exit 0.
+.TP
+.B \-\-version
+Print the version and exit.
+.TP
+.BR \-h ", " \-\-help
+Print the usage summary and exit.
+.PP
+When a capability is unavailable, one line per run (not per file) goes to
+standard error, for example
+.IR "prosefix: skipped variety spelling (Vale not found: brew install vale)" .
+.SH SETTINGS
+For each file, prosefix looks upward from the file's directory for
+.IR prosefix.toml ,
+.I .prosefix.toml
+or a
+.B [tool.prosefix]
+table in
+.IR pyproject.toml ,
+and uses the first it finds. Keys:
+.TS
+l l l.
+target	"us" or "uk"	variety
+style	string	style guide
+only	list of "style", "proof"	passes to run (default both)
+skip	list of tier names	tiers to skip
+exclude	list of globs	files skipped in directory walks
+accept	list of strings	words and phrases never changed
+accept_file	string	file of accept entries, one per line
+cache	string	decision cache path
+.TE
+.PP
+Unknown keys and wrong types are errors naming the file and key.
+.B exclude
+globs are matched against paths relative to the settings file's directory;
+.B **
+crosses directories, while
+.B *
+and
+.B ?
+do not. A bare directory name does not exclude its contents: write
+.IR templates/** .
+.B accept_file
+is relative to the settings file; lines starting with # are comments.
+.B cache
+defaults to
+.I .prosefix/cache.json
+beside the settings file; the comma decisions go to
+.I commas.json
+beside it. The cache, the accept file and the comma file must resolve inside
+the project directory; a settings file that points outside it is an error.
+With no settings file, decisions are cached in
+.I $XDG_CACHE_HOME/prosefix/
+(default
+.IR ~/.cache/prosefix/ ).
+Commit
+.I .prosefix/
+so CI can replay your decisions with
+.BR "\-\-llm cached" .
+.PP
+The model endpoint is never a project setting; it comes only from the flags,
+the environment and the user's config files, so a cloned site cannot direct
+your key elsewhere.
+.SS Front matter
+A note may override the project:
+.PP
+.RS
+.nf
+prosefix: off
+prosefix: {target: uk, style: oxford, skip: [commas]}
+lang: en-GB
+.fi
+.RE
+.PP
+.B prosefix: off
+(or
+.BR false )
+skips the note (status
+.BR skipped ).
+The mapping may hold only
+.BR target ,
+.BR style ,
+.B only
+and
+.BR skip .
+Without
+.BR prosefix.target ,
+a
+.B lang
+of en-GB or en-US (case-insensitive; en-UK is accepted) sets the target.
+Front matter that does not parse, or is not a mapping, is left untouched and
+the note is processed with project settings; a
+.B note
+review item says why.
+.PP
+Precedence: command-line flags, then front matter, then the project file,
+then the defaults (US English, the default guide for the target). Accept
+lists are merged: stylefix's built-in list,
+.IR ~/.config/stylefix/accept.txt ,
+.IR ~/.config/proofix/accept.txt ,
+and the project's
+.B accept
+and
+.BR accept_file .
+.SH TIERS
+Each tier runs when what it needs is available; otherwise it is skipped and
+reported once. Names for
+.B \-\-skip
+and
+.BR skip :
+.SS Style pass (needs Vale unless noted)
+.TP
+.B variety
+US or UK spelling of the productive endings and VarCon variants. Vale.
+.TP
+.B guide
+The style guide's word and phrase preferences. Vale.
+.TP
+.B ambiguous
+Words whose form depends on meaning (licence/license). Vale; a model decides.
+.TP
+.B numbers
+The numeral rule of the guide. Vale.
+.TP
+.B serial\-comma
+Serial comma according to the guide. No tool needed.
+.TP
+.B abbreviations
+Abbreviation forms (e.g., i.e., titles). No tool needed.
+.TP
+.B punctuation
+Dashes, ranges, curly quotes and apostrophes. No tool needed.
+.SS Proof pass
+.TP
+.B hygiene
+Line endings, trailing whitespace, doubled spaces. No tool needed.
+.TP
+.B mechanical
+Grammar and mechanical errors. LanguageTool.
+.TP
+.B typos
+Misspellings. typos.
+.TP
+.B adjudicated
+Model-checked corrections from LanguageTool. LanguageTool and a model.
+.TP
+.B compounds
+Open, hyphenated or closed compounds. A model.
+.TP
+.B commas
+Comma placement. A model.
+.PP
+With no model, the stylefix and proofix decisions that need one are not made
+and are reported as undecided; rule-based tiers still run.
+.SH JSON
+.B \-\-json
+prints one UTF\-8 document:
+.PP
+.RS
+.nf
+{"schema": 1, "prosefix": "0.1.0",
+ "endpoint": {"url", "model", "source"} or null,
+ "skipped": [{"what", "why", "fix"}],
+ "files": [{"path", "status", "reason", "settings",
+            "changes": [...], "review": [...], "output"}]}
+.fi
+.RE
+.PP
+.B status
+is
+.BR changed ,
+.BR unchanged ,
+.B skipped
+or
+.B error
+(an error carries a
+.B reason
+and no
+.B changes
+or
+.BR output ).
+Each change has
+.BR id " (s1... for stylefix, p1... for proofix),"
+.BR pass ,
+.BR check ,
+.BR start ,
+.BR end ,
+.BR line ,
+.BR before ,
+.BR after ,
+.BR reason ,
+.BR decided_by " (rule, model or cache),"
+.B confidence
+and
+.BR depends_on .
+.PP
+.B start
+and
+.B end
+are offsets into the whole original file, front matter included, in
+.B UTF\-16 code units
+(the unit JavaScript and CodeMirror use). A
+.B line
+is 1\-based. Standard input is reported as path
+.B \-
+or the
+.B \-\-stdin\-filename
+path.
+.PP
+.B depends_on
+means
+.I supersedes:
+a change that lists others already contains their full effect over its span.
+To apply a selection of changes, drop every change a selected change depends
+on, then splice the rest into the original in descending
+.RI ( start ,
+.IR end )
+order. Valid selections are closed under
+.BR depends_on .
+.PP
+Each review item has
+.BR pass ,
+.BR line ,
+.B kind
+(undecided, rejected, alert or note),
+.B check
+and
+.BR message .
+Within schema 1 fields may be added but never removed or changed in meaning.
+.SH ENVIRONMENT
+.TP
+.BR PROSEFIX_LLM_URL ", " PROSEFIX_LLM_MODEL ", " PROSEFIX_LLM_KEY
+Endpoint, model and API key for prosefix; below the flags, above the config files.
+.TP
+.BR ADJUDICATE_LLM_URL ", " ADJUDICATE_LLM_MODEL ", " ADJUDICATE_LLM_KEY
+The same, shared with stylefix and proofix; below
+.I ~/.config/prosefix/config.toml
+and above
+.IR ~/.config/adjudicate/config.toml .
+A \-\-url or PROSEFIX_LLM_URL drops the keys set in lower layers; set
+PROSEFIX_LLM_KEY (or \fBapi_key_env\fR in the config file) alongside it.
+.TP
+.B OLLAMA_HOST
+Ollama base URL. Default http://localhost:11434.
+.TP
+.B XDG_CONFIG_HOME
+Replaces ~/.config. The accept lists and config files are read from it.
+.TP
+.B XDG_CACHE_HOME
+Replaces ~/.cache for the decision cache used when there is no project settings file.
+.SH FILES
+.TP
+.I ~/.config/prosefix/config.toml
+.TQ
+.I ~/.config/adjudicate/config.toml
+Table
+.B [llm]
+with keys url, model, api_key or api_key_env, timeout, thinking_switch. The
+first applies to prosefix only; the second is shared. A file that sets url
+discards the model, key and thinking_switch of the layers below it.
+.TP
+.IR prosefix.toml ", " .prosefix.toml ", " pyproject.toml
+Project settings; see SETTINGS.
+.TP
+.I .prosefix/cache.json
+.TQ
+.I .prosefix/commas.json
+The decision caches, beside the settings file.
+.SH EXIT STATUS
+.TP
+.B 0
+Success.
+.TP
+.B 1
+.B \-\-check
+found files that would change (with
+.BR \-\-strict ,
+files with review items too).
+.TP
+.B 2
+A usage, configuration or input error, a failed write, or a
+.B \-\-require
+failure. This wins over 1.
+.PP
+A missing tool is never an error unless required.
+.SH EXAMPLES
+Rewrite a note, or a whole Obsidian vault, in place, previewing first:
+.PP
+.RS
+.nf
+prosefix vault/ --diff
+prosefix vault/
+.fi
+.RE
+.PP
+A CI job that fails if any page would change, using only decisions committed in
+.IR .prosefix/ :
+.PP
+.RS
+.nf
+prosefix content/ --check --llm cached
+.fi
+.RE
+.PP
+As a filter, with UK English:
+.PP
+.RS
+.nf
+prosefix - --target uk < in.md > out.md
+.fi
+.RE
+.SH SEE ALSO
+.BR stylefix (1),
+.BR proofix (1),
+.BR vale (1),
+.BR languagetool (1)
+.PP
+https://github.com/AndrewBroz/prosefix
