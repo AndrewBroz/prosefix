@@ -1,0 +1,46 @@
+[project]
+name = "prosefix"
+version = "0.1.0"
+description = "Clean, consistent prose in Markdown: stylefix's spelling and style guide plus proofix's typos, punctuation and commas, in one command."
+readme = "README.md"
+requires-python = ">=3.11"
+license = "MIT"
+license-files = ["LICENSE"]
+authors = [{ name = "Andrew Brož" }]
+dependencies = ["adjudicate>=0.3.1,<0.4", "stylefix>=0.8,<0.9", "proofix>=0.6,<0.7", "pyyaml>=6"]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Environment :: Console",
+    "Intended Audience :: End Users/Desktop",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.11",
+    "Topic :: Text Processing :: Markup :: Markdown",
+]
+
+[project.urls]
+Homepage = "https://github.com/AndrewBroz/prosefix"
+Issues = "https://github.com/AndrewBroz/prosefix/issues"
+
+[project.scripts]
+prosefix = "prosefix.cli:main"
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["prosefix"]
+
+[tool.hatch.build.targets.sdist]
+only-include = ["prosefix", "tests", "man", "LICENSE", "README.md", "pyproject.toml"]
+
+[tool.uv.sources]
+adjudicate = { path = "../adjudicate", editable = true }
+stylefix = { path = "../stylefix", editable = true }
+proofix = { path = "../proofix", editable = true }
+
+[dependency-groups]
+dev = ["pytest>=8"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
