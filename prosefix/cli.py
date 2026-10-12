@@ -4,10 +4,13 @@ from __future__ import annotations
 
 import argparse
 import difflib
+import errno
 import functools
 import json
+import os
 import re
 import sys
+import tempfile
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
 from pathlib import Path
@@ -148,6 +151,28 @@ def _is_excluded(p: Path) -> bool:
     return excluded(rel, tuple(settings_exclude))
 
 
+def _write_atomic(path: Path, text: str) -> None:
+    """Write via a temporary file beside the target, keeping its mode; a crash cannot truncate it."""
+    if path.is_symlink():
+        path = path.resolve()
+    if path.exists() and not os.access(path, os.W_OK):      # a rename would bypass a read-only file
+        raise PermissionError(errno.EACCES, "Permission denied", str(path))
+    mode = path.stat().st_mode & 0o7777 if path.exists() else None
+    fd, tmp = tempfile.mkstemp(prefix=f".{path.name}.", dir=path.parent)
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8", newline="") as fh:
+            fh.write(text)
+        if mode is not None:
+            os.chmod(tmp, mode)
+        os.replace(tmp, path)
+    except BaseException:
+        try:
+            os.unlink(tmp)
+        except OSError:
+            pass
+        raise
+
+
 def _err(msg: str) -> None:
     print(f"prosefix: {msg}", file=sys.stderr)
 
@@ -263,21 +288,22 @@ def main(argv=None) -> int:
             project = find_project(job.lookup)
             settings = resolve(job.lookup, text, flags, project)
         except SettingsError as e:
-            _err(str(e))
             return engine.FileResult(job.label, "error", str(e), settings, text or "", text or "")
         try:
             return engine.process(job.label, text, settings, ep, engine.caches_for(settings, mode), replay)
         except Exception as e:                               # one bad file must not sink the run
             msg = f"{type(e).__name__}: {e}"
-            _err(f"{job.label}: {msg}")
             return engine.FileResult(job.label, "error", msg, settings, text, text)
 
     with ThreadPoolExecutor(max_workers=max(1, args.jobs)) as pool:
         results = list(pool.map(run, jobs))
     if mode != "off":
         engine.flush_all()
-    if any(r.status == "error" for r in results):
-        failed = True
+    for r in results:
+        if r.status == "error":
+            failed = True
+            if not args.json:
+                _err(f"{r.path}: {r.reason}")
 
     skipped: dict[str, Skipped] = {}
     for r in results:
@@ -330,14 +356,17 @@ def main(argv=None) -> int:
             return 2 if failed else 1
     else:
         for job, r in zip(jobs, results):
-            if r.status == "error":
+            if job.path is None:                       # stdin filter: always emit text, even on error
+                sys.stdout.write(r.output if r.status != "error" else job.text)
                 continue
-            if job.path is None:                       # stdin filter: always emit text
-                sys.stdout.write(r.output)
-            elif args.output:
-                Path(args.output).write_text(r.output, encoding="utf-8", newline="")
-            elif r.status == "changed":
-                job.path.write_text(r.output, encoding="utf-8", newline="")
+            if r.status == "error" or not (args.output or r.status == "changed"):
+                continue
+            target = Path(args.output) if args.output else job.path
+            try:
+                _write_atomic(target, r.output)
+            except OSError as e:
+                _err(f"{target}: cannot write: {e.strerror or e}")
+                failed = True
         if not args.quiet:
             out = sys.stderr if any(j.path is None for j in jobs) else sys.stdout
             for r in results:

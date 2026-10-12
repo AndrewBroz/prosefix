@@ -138,3 +138,44 @@ def test_missing_path_exit_2(note, tmp_path, capsys):
     assert main([str(note), str(tmp_path / "nope.md"), "--llm", "none"]) == 2
     assert "no such file" in capsys.readouterr().err
     assert note.read_text() != DOC
+
+
+@pytest.mark.skipif(os.geteuid() == 0, reason="root ignores file modes")
+def test_unwritable_file_does_not_stop_the_run(tmp_path, capsys):
+    ro = tmp_path / "a_ro.md"
+    ok = tmp_path / "b.md"
+    ro.write_text(DOC)
+    ok.write_text(DOC)
+    ro.chmod(0o444)
+    assert main([str(tmp_path), "--llm", "none"]) == 2
+    err = capsys.readouterr().err
+    assert "cannot write" in err and "a_ro.md" in err
+    assert ro.read_text() == DOC and ok.read_text() != DOC
+
+
+def test_write_keeps_mode(note):
+    note.chmod(0o640)
+    main([str(note), "--llm", "none"])
+    assert note.stat().st_mode & 0o777 == 0o640 and note.read_text() != DOC
+
+
+@pytest.mark.parametrize("flags", [[], ["--check"]])
+def test_non_utf8_file_is_reported(tmp_path, capsys, flags):
+    p = tmp_path / "bad.md"
+    p.write_bytes("caf\xe9 au lait\n".encode("latin-1"))
+    assert main([str(p), "--llm", "none", *flags]) == 2
+    assert "bad.md" in capsys.readouterr().err
+
+
+def test_stdin_error_still_emits_input(tmp_path, monkeypatch, capsys):
+    (tmp_path / "prosefix.toml").write_text("targit = 1\n")
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr("sys.stdin", io.StringIO(DOC))
+    assert main(["-", "--llm", "none"]) == 2
+    cap = capsys.readouterr()
+    assert cap.out == DOC and "targit" in cap.err
+
+
+def test_strict_check_on_clean_note_passes(note):
+    main([str(note), "--llm", "none"])
+    assert main([str(note), "--check", "--strict", "--llm", "none"]) == 0
