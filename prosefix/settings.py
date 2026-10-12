@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import functools
+import os
 import re
 import tomllib
 from dataclasses import dataclass
@@ -113,8 +114,20 @@ def front_matter(text: str) -> tuple[dict | None, str | None]:
     return data, None
 
 
-def _read_accept_file(root: Path, name: str) -> list[str]:
-    path = root / name
+def _inside(project: Project, key: str, value: str) -> Path:
+    """value resolved against the project root; it must stay inside it, symlinks included."""
+    root = project.root
+    bad = SettingsError(f"{project.source}: {key} must be a path inside {root}, not {value!r}")
+    if Path(value).is_absolute():
+        raise bad
+    path = root / value
+    if not path.resolve().is_relative_to(root.resolve()):
+        raise bad
+    return path
+
+
+def _read_accept_file(project: Project, name: str) -> list[str]:
+    path = _inside(project, "accept_file", name)
     try:
         lines = path.read_text(encoding="utf-8").splitlines()
     except (OSError, UnicodeDecodeError) as e:
@@ -145,10 +158,17 @@ def resolve(path: Path | None, text: str, flags: dict, project: Project) -> Sett
     v.update({k: val for k, val in flags.items() if val is not None})
     accept = list(v.get("accept", []))
     if project.root and "accept_file" in v:
-        accept += _read_accept_file(project.root, v["accept_file"])
-    base = project.root or Path.cwd()
+        accept += _read_accept_file(project, v["accept_file"])
+    if "cache" in v and project.root:
+        cache = _inside(project, "cache", v["cache"])
+    elif "cache" in v:                     # only from a flag or note: relative to the working directory
+        cache = Path.cwd() / v["cache"]
+    elif project.root:
+        cache = project.root / ".prosefix" / "cache.json"
+    else:
+        cache = Path(os.environ.get("XDG_CACHE_HOME") or Path.home() / ".cache") / "prosefix" / "cache.json"
     return Settings(target=v["target"], style=v.get("style"),
                     only=tuple(v.get("only", PASSES)), skip=frozenset(v.get("skip", ())),
                     exclude=tuple(v.get("exclude", ())), accept=tuple(accept),
-                    cache=base / v.get("cache", ".prosefix/cache.json"),
+                    cache=cache,
                     project=project.source, off=off, note=note)

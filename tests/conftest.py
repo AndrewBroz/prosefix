@@ -10,6 +10,7 @@ LLM_ENV = [f"{app}_LLM_{s}" for app in ("ADJUDICATE", "STYLEFIX", "PROOFIX", "PR
 def isolated_llm_config(tmp_path_factory, monkeypatch):
     xdg = tmp_path_factory.mktemp("xdg")
     monkeypatch.setenv("XDG_CONFIG_HOME", str(xdg))
+    monkeypatch.setenv("XDG_CACHE_HOME", str(tmp_path_factory.mktemp("xdg-cache")))
     for name in LLM_ENV:
         monkeypatch.delenv(name, raising=False)
     monkeypatch.setenv("OLLAMA_HOST", "http://127.0.0.1:9")

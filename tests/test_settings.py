@@ -17,6 +17,16 @@ def test_defaults_without_project(tmp_path):
     assert (s.target, s.style, s.only, s.skip, s.off) == ("us", None, ("style", "proof"), frozenset(), False)
 
 
+def test_cache_without_project_is_in_the_user_cache_dir(tmp_path, monkeypatch):
+    monkeypatch.setenv("XDG_CACHE_HOME", str(tmp_path / "xc"))
+    find_project.cache_clear()
+    s = resolve(tmp_path / "n.md", "Text.\n", {}, find_project(tmp_path / "n.md"))
+    assert s.cache == tmp_path / "xc" / "prosefix" / "cache.json"
+    monkeypatch.delenv("XDG_CACHE_HOME")
+    s = resolve(tmp_path / "n.md", "Text.\n", {}, find_project(tmp_path / "n.md"))
+    assert s.cache == Path.home() / ".cache" / "prosefix" / "cache.json"
+
+
 def test_project_file_is_found_upwards(tmp_path):
     (tmp_path / "prosefix.toml").write_text('target = "uk"\nskip = ["commas"]\n')
     (tmp_path / "a" / "b").mkdir(parents=True)
@@ -80,3 +90,30 @@ def test_front_matter_parsing():
     assert front_matter("No front matter\n") == (None, None)
     assert front_matter("---\na: 1\n---\nx") == ({"a": 1}, None)
     assert front_matter("---\r\na: 1\r\n---\r\nx")[0] == {"a": 1}
+
+
+def _resolve_in(tmp_path, body):
+    root = tmp_path / "proj"
+    root.mkdir(exist_ok=True)
+    (root / "prosefix.toml").write_text(body)
+    find_project.cache_clear()
+    return resolve(root / "n.md", "x\n", {}, find_project(root / "n.md"))
+
+
+@pytest.mark.parametrize("key, value", [("cache", "../outside.json"), ("cache", "/tmp/x.json"),
+                                         ("accept_file", "../../etc/passwd"),
+                                         ("accept_file", "/etc/passwd"),
+                                         ("cache", "link/c.json"), ("accept_file", "link/words.txt")])
+def test_cache_and_accept_file_stay_inside_the_project(tmp_path, key, value):
+    outside = tmp_path / "elsewhere"
+    outside.mkdir()
+    (outside / "words.txt").write_text("a\n")
+    (tmp_path / "proj").mkdir()
+    (tmp_path / "proj" / "link").symlink_to(outside)
+    with pytest.raises(SettingsError, match=key):
+        _resolve_in(tmp_path, f'{key} = "{value}"\n')
+
+
+def test_relative_cache_inside_the_project_works(tmp_path):
+    s = _resolve_in(tmp_path, 'cache = "sub/c.json"\n')
+    assert s.cache == tmp_path / "proj" / "sub" / "c.json"
