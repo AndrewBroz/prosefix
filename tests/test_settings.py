@@ -177,3 +177,8 @@ def test_explicit_targets_beat_detection(tmp_path, body, flags, front, want):
 def test_project_target_beats_detection(tmp_path):
     s = resolve(tmp_path / "n.md", UK, {}, proj(tmp_path, 'target = "us"\n'))
     assert (s.target, s.target_source) == ("us", "project")
+
+
+def test_other_lang_does_not_set_target_so_detection_runs(tmp_path):
+    s = resolve(tmp_path / "n.md", "---\nlang: en-AU\n---\n" + UK, {}, proj(tmp_path, ""))
+    assert (s.target, s.target_source) == ("uk", "detected")
