@@ -42,3 +42,7 @@ def test_nothing_personal_ships():
     readme = (ROOT / "README.md").read_text(encoding="utf-8")
     for text in (readme, MAN, build_parser().format_help()):
         assert "~/Code" not in text and "dgx" not in text.lower()
+
+
+def test_man_page_asks_for_tbl():
+    assert MAN.startswith("'\\\" t\n")          # the man page has tables

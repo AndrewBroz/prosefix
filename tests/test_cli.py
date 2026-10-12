@@ -202,3 +202,109 @@ def test_stdin_filename_not_excluded_is_still_fixed(tmp_path, monkeypatch, capsy
     monkeypatch.setattr("sys.stdin", io.StringIO(DOC))
     assert main(["-", "--llm", "none", "--stdin-filename", str(tmp_path / "notes.md")]) == 0
     assert capsys.readouterr().out != DOC
+
+
+def test_diff_marks_a_missing_final_newline_and_patch_applies_it(tmp_path, capsys):
+    import shutil
+    import subprocess
+    p = tmp_path / "n.md"
+    p.write_text(DOC.rstrip("\n"))
+    assert main([str(p), "--diff", "--llm", "none"]) == 0
+    diff = capsys.readouterr().out
+    assert "\n\\ No newline at end of file\n" in diff
+    if shutil.which("patch"):
+        copy = tmp_path / "copy.md"
+        copy.write_text(DOC.rstrip("\n"))
+        subprocess.run(["patch", "-s", str(copy)], input=diff, text=True, check=True)
+        main([str(p), "--llm", "none"])
+        assert copy.read_text() == p.read_text()
+
+
+@pytest.mark.skipif(os.geteuid() == 0, reason="root ignores file modes")
+def test_check_with_cached_decisions_in_a_read_only_project(tmp_path, capsys):
+    (tmp_path / "prosefix.toml").write_text("")
+    p = tmp_path / "n.md"
+    p.write_text(DOC)
+    tmp_path.chmod(0o555)
+    try:
+        assert main([str(p), "--check", "--llm", "cached"]) == 1
+    finally:
+        tmp_path.chmod(0o755)
+    assert "Traceback" not in capsys.readouterr().err
+    assert not (tmp_path / ".prosefix").exists()
+
+
+@pytest.mark.parametrize("flags", [["--check"], ["--diff"], ["--json"], []])
+def test_preview_modes_write_no_empty_cache(tmp_path, flags):
+    (tmp_path / "prosefix.toml").write_text("")
+    p = tmp_path / "n.md"
+    p.write_text(DOC)
+    main([str(p), "--llm", "cached", *flags])
+    assert not (tmp_path / ".prosefix").exists()
+
+
+def test_cache_save_failure_is_reported_not_fatal(note, monkeypatch, capsys):
+    from prosefix import engine
+    monkeypatch.setattr(engine, "flush_all", lambda: ["cannot save decisions to /x/cache.json: Permission denied"])
+    assert main([str(note), "--llm", "cached"]) == 0
+    assert "prosefix: cannot save decisions to /x/cache.json: Permission denied" in capsys.readouterr().err
+
+
+@pytest.mark.parametrize("umask", [0o022, 0o002, 0o077])
+def test_new_output_file_follows_the_umask(note, tmp_path, umask):
+    out = tmp_path / "o.md"
+    old = os.umask(umask)
+    try:
+        assert main([str(note), "-o", str(out), "--llm", "none"]) == 0
+    finally:
+        os.umask(old)
+    assert out.stat().st_mode & 0o777 == 0o666 & ~umask
+
+
+def test_file_edited_during_the_run_is_left_alone(note, monkeypatch, capsys):
+    from prosefix import engine
+    real = engine.process
+
+    def process(*a, **kw):
+        r = real(*a, **kw)
+        note.write_text(DOC + "Typed while prosefix ran.\n")     # Obsidian autosaves
+        return r
+    monkeypatch.setattr(engine, "process", process)
+    assert main([str(note), "--llm", "none"]) == 2
+    assert note.read_text() == DOC + "Typed while prosefix ran.\n"
+    assert f"prosefix: {note}: changed during the run; left alone" in capsys.readouterr().err
+
+
+def test_unwritable_report_is_an_error_not_a_traceback(note, tmp_path, capsys):
+    assert main([str(note), "--llm", "none", "--report", str(tmp_path / "no" / "r.md")]) == 2
+    assert "cannot write report" in capsys.readouterr().err
+
+
+def test_unknown_style_is_a_usage_error(note, capsys):
+    with pytest.raises(SystemExit) as e:
+        main([str(note), "--style", "nope", "--llm", "none"])
+    assert e.value.code == 2 and "chicago" in capsys.readouterr().err
+
+
+def test_output_with_stdin_is_a_usage_error(tmp_path, monkeypatch, capsys):
+    monkeypatch.setattr("sys.stdin", io.StringIO(DOC))
+    with pytest.raises(SystemExit) as e:
+        main(["-", "-o", str(tmp_path / "out.md"), "--llm", "none"])
+    assert e.value.code == 2 and "-o cannot be used with -" in capsys.readouterr().err
+    assert not (tmp_path / "out.md").exists()
+
+
+def test_decisions_are_saved_when_the_run_is_interrupted(tmp_path):
+    from prosefix import engine
+    (tmp_path / "prosefix.toml").write_text("")
+    p = tmp_path / "n.md"
+    p.write_text(DOC)
+
+    def process(label, text, settings, endpoint, caches, replay, parallel=4):
+        caches.cache.data["k"] = {"word": "color", "choice": "colour"}     # a paid decision
+        raise KeyboardInterrupt
+    import unittest.mock
+    with unittest.mock.patch.object(engine, "process", process), pytest.raises(KeyboardInterrupt):
+        main([str(p), "--llm", "cached"])
+    assert json.loads((tmp_path / ".prosefix" / "cache.json").read_text()) == {
+        "k": {"word": "color", "choice": "colour"}}

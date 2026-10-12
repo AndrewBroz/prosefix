@@ -16,6 +16,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from adjudicate import ConfigError, Skipped, check_endpoint, resolve_endpoint, run_setup
+from stylefix import styleguides
 
 from . import __version__, engine, jsonout, tools
 from .settings import PASSES, TIERS, Settings, SettingsError, find_project, resolve
@@ -60,7 +61,8 @@ def build_parser() -> argparse.ArgumentParser:
     m.add_argument("--json", action="store_true", help="print proposals as JSON (schema 1); write nothing")
     p.add_argument("--strict", action="store_true", help="with --check, review items also fail")
     p.add_argument("--target", choices=["us", "uk"], help="English variety")
-    p.add_argument("--style", metavar="GUIDE", help="style guide, as stylefix --style")
+    p.add_argument("--style", metavar="GUIDE", choices=styleguides.choices(),
+                   help="style guide, as stylefix --style: " + ", ".join(styleguides.choices()))
     p.add_argument("--only", choices=PASSES, help="run one pass only")
     p.add_argument("--skip", metavar="TIER,...", help="tiers to skip: " + ", ".join(TIERS))
     p.add_argument("--llm", choices=["auto", "ollama", "none", "cached"], default="auto",
@@ -151,19 +153,41 @@ def _is_excluded(p: Path) -> bool:
     return excluded(rel, tuple(settings_exclude))
 
 
-def _write_atomic(path: Path, text: str) -> None:
-    """Write via a temporary file beside the target, keeping its mode; a crash cannot truncate it."""
+class ChangedDuringRun(Exception):
+    """The file on disk is no longer the text that was processed."""
+
+
+def _read_umask() -> int:
+    old = os.umask(0)
+    os.umask(old)
+    return old
+
+
+_UMASK = 0o022                 # read once, at startup, in main()
+
+
+def _write_atomic(path: Path, text: str, expect: str | None = None) -> None:
+    """Write via a temporary file beside the target, keeping its mode (a new file gets
+    0666 less the umask); a crash cannot truncate it. With `expect`, the target is
+    re-read just before the rename and left alone if it no longer holds that text."""
     if path.is_symlink():
         path = path.resolve()
     if path.exists() and not os.access(path, os.W_OK):      # a rename would bypass a read-only file
         raise PermissionError(errno.EACCES, "Permission denied", str(path))
-    mode = path.stat().st_mode & 0o7777 if path.exists() else None
+    mode = path.stat().st_mode & 0o7777 if path.exists() else 0o666 & ~_UMASK
     fd, tmp = tempfile.mkstemp(prefix=f".{path.name}.", dir=path.parent)
     try:
         with os.fdopen(fd, "w", encoding="utf-8", newline="") as fh:
             fh.write(text)
-        if mode is not None:
-            os.chmod(tmp, mode)
+        os.chmod(tmp, mode)
+        if expect is not None:
+            try:
+                with open(path, encoding="utf-8", newline="") as fh:
+                    now = fh.read()
+            except (OSError, UnicodeDecodeError):
+                now = None
+            if now != expect:
+                raise ChangedDuringRun(str(path))
         os.replace(tmp, path)
     except BaseException:
         try:
@@ -204,7 +228,19 @@ def _lines(r):
         yield _change_line(r.path, r.original.count("\n", 0, c.start) + 1, c)
 
 
+def _unified_diff(a: str, b: str, label: str):
+    """difflib's unified diff, with the marker patch(1) needs after a last line
+    that has no newline."""
+    for line in difflib.unified_diff(a.splitlines(True), b.splitlines(True), label, label):
+        if line.endswith("\n"):
+            yield line
+        else:
+            yield line + "\n\\ No newline at end of file\n"
+
+
 def main(argv=None) -> int:
+    global _UMASK
+    _UMASK = _read_umask()
     parser = build_parser()
     args = parser.parse_args(argv)
     if args.setup:
@@ -217,6 +253,8 @@ def main(argv=None) -> int:
         return _doctor(args)
     if not args.paths:
         parser.error("give files, directories, or - for stdin")
+    if args.output and "-" in args.paths:
+        parser.error("-o cannot be used with -")
     if args.output and (len(args.paths) > 1 or Path(args.paths[0]).is_dir()):
         parser.error("-o takes exactly one input file")
     if args.strict and not args.check:
@@ -298,10 +336,13 @@ def main(argv=None) -> int:
             msg = f"{type(e).__name__}: {e}"
             return engine.FileResult(job.label, "error", msg, settings, text, text)
 
-    with ThreadPoolExecutor(max_workers=max(1, args.jobs)) as pool:
-        results = list(pool.map(run, jobs))
-    if mode != "off":
-        engine.flush_all()
+    try:
+        with ThreadPoolExecutor(max_workers=max(1, args.jobs)) as pool:
+            results = list(pool.map(run, jobs))
+    finally:                          # decisions already paid for survive Ctrl-C or a crash
+        if mode != "off":
+            for msg in engine.flush_all():
+                _err(msg)
     for r in results:
         if r.status == "error":
             failed = True
@@ -329,16 +370,20 @@ def main(argv=None) -> int:
             for line in _lines(r):
                 print(line, file=sys.stderr)
     if args.report:
-        with open(args.report, "w", encoding="utf-8") as fh:
-            for r in results:
-                fh.write(f"## {r.path}\n\n")
-                if r.status in ("error", "skipped"):
-                    fh.write(f"{r.status}: {r.reason}\n\n")
-                for line in _lines(r):
-                    fh.write(f"- {line}\n")
-                for i in r.review:
-                    fh.write(f"- review, line {i.line}: [{i.pass_} {i.check}] {i.message}\n")
-                fh.write("\n")
+        try:
+            with open(args.report, "w", encoding="utf-8") as fh:
+                for r in results:
+                    fh.write(f"## {r.path}\n\n")
+                    if r.status in ("error", "skipped"):
+                        fh.write(f"{r.status}: {r.reason}\n\n")
+                    for line in _lines(r):
+                        fh.write(f"- {line}\n")
+                    for i in r.review:
+                        fh.write(f"- review, line {i.line}: [{i.pass_} {i.check}] {i.message}\n")
+                    fh.write("\n")
+        except OSError as e:
+            _err(f"{args.report}: cannot write report: {e.strerror or e}")
+            failed = True
 
     n_changes = sum(len(r.changes) for r in changed)
     if args.json:
@@ -346,8 +391,7 @@ def main(argv=None) -> int:
         sys.stdout.write("\n")
     elif args.diff:
         for r in changed:
-            sys.stdout.writelines(difflib.unified_diff(
-                r.original.splitlines(True), r.output.splitlines(True), r.path, r.path))
+            sys.stdout.writelines(_unified_diff(r.original, r.output, r.path))
     elif args.check:
         flagged = [r for r in results if r.status == "changed" or (args.strict and r.review)]
         for r in flagged:
@@ -366,7 +410,10 @@ def main(argv=None) -> int:
                 continue
             target = Path(args.output) if args.output else job.path
             try:
-                _write_atomic(target, r.output)
+                _write_atomic(target, r.output, expect=None if args.output else r.original)
+            except ChangedDuringRun:
+                _err(f"{target}: changed during the run; left alone")
+                failed = True
             except OSError as e:
                 _err(f"{target}: cannot write: {e.strerror or e}")
                 failed = True

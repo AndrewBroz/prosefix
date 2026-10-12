@@ -46,7 +46,7 @@ prosefix - < in.md > out.md               # filter
 prosefix note.md --target uk --skip commas
 ```
 
-Directory walks take `*.md` and `*.markdown`, skipping `.git`, `.obsidian`, `node_modules`, other dot-directories and your `exclude` globs. Exit status: 0 success; 1 from `--check` (or `--strict`) when something would change; 2 for usage, configuration, input or write errors, or a failed `--require`. Any per-file error is reported on stderr and gives 2, but the other files are still processed.
+Directory walks take `*.md` and `*.markdown`, skipping `.git`, `.obsidian`, `node_modules`, other dot-directories and your `exclude` globs. Exit status: 0 success; 1 from `--check` (or `--strict`) when something would change; 2 for usage, configuration, input or write errors, a file that changed on disk during the run (it is left alone), or a failed `--require`. Any per-file error is reported on stderr and gives 2, but the other files are still processed.
 
 Writes are atomic, keep the file's mode, and follow symlinks to their target; read-only files are reported and left alone.
 

@@ -133,3 +133,16 @@ def test_commas_file_symlinked_outside_is_refused(tmp_path):
     (tmp_path / "proj" / "c" / "commas.json").symlink_to(tmp_path / "out.json")
     with pytest.raises(SettingsError, match="must be a path inside"):
         _resolve_in(tmp_path, 'cache = "c/cache.json"\n')
+
+
+def test_front_matter_after_a_byte_order_mark():
+    assert front_matter("\ufeff---\nprosefix: {target: uk}\n---\nx\n") == ({"prosefix": {"target": "uk"}}, None)
+
+
+@pytest.mark.parametrize("where", ["project", "note"])
+def test_unknown_style_names_the_key_and_the_known_guides(tmp_path, where):
+    with pytest.raises(SettingsError, match=r"style has unknown value 'nope' \(known: chicago, .*oxford"):
+        if where == "project":
+            resolve(tmp_path / "n.md", "x\n", {}, proj(tmp_path, 'style = "nope"\n'))
+        else:
+            resolve(tmp_path / "n.md", "---\nprosefix: {style: nope}\n---\nx\n", {}, proj(tmp_path, ""))

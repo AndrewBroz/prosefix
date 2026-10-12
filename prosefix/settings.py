@@ -16,7 +16,7 @@ STYLE_TIERS = ("variety", "guide", "ambiguous", "numbers", "serial-comma", "abbr
 PROOF_TIERS = ("hygiene", "mechanical", "typos", "adjudicated", "compounds", "commas")
 TIERS = STYLE_TIERS + PROOF_TIERS
 SETTINGS_FILES = ("prosefix.toml", ".prosefix.toml")
-FRONT = re.compile(r"\A---\r?\n(.*?)\r?\n---\r?\n", re.S)
+FRONT = re.compile(r"\A\ufeff?---\r?\n(.*?)\r?\n---\r?\n", re.S)
 
 _LISTS = {"only": PASSES, "skip": TIERS, "exclude": None, "accept": None}
 _PROJECT_KEYS = ("target", "style", "only", "skip", "exclude", "accept", "accept_file", "cache")
@@ -58,6 +58,8 @@ def _validate(table, where: str, allowed: tuple[str, ...]) -> dict:
             raise SettingsError(f"{where}: target must be \"us\" or \"uk\", not {v!r}")
         if k in ("style", "accept_file", "cache") and not isinstance(v, str):
             raise SettingsError(f"{where}: {k} must be a string, not {v!r}")
+        if k == "style" and v not in _guides():
+            raise SettingsError(f"{where}: style has unknown value {v!r} (known: {', '.join(_guides())})")
         if k in _LISTS:
             if not isinstance(v, list) or not all(isinstance(x, str) for x in v):
                 raise SettingsError(f"{where}: {k} must be a list of strings, not {v!r}")
@@ -67,6 +69,11 @@ def _validate(table, where: str, allowed: tuple[str, ...]) -> dict:
                 raise SettingsError(f"{where}: {k} has unknown value '{bad[0]}' "
                                     f"(known: {', '.join(choices)})")
     return dict(table)
+
+
+def _guides() -> list[str]:
+    from stylefix import styleguides
+    return styleguides.choices()
 
 
 def _load_toml(path: Path) -> dict:

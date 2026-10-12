@@ -1,3 +1,4 @@
+'\" t
 .TH PROSEFIX 1 "October 2026" "prosefix 0.1.0" "User Commands"
 .SH NAME
 prosefix \- clean, consistent prose in Markdown: spelling, style, typos, punctuation and commas in one command
@@ -75,7 +76,8 @@ for standard input.
 .BR \-o ", " \-\-output " " \fIFILE\fR
 Write one input file's result to
 .I FILE
-instead of in place. Takes exactly one input file.
+instead of in place. Takes exactly one input file, not
+.BR \- .
 .TP
 .B \-\-stdin\-filename \fIPATH\fR
 With
@@ -455,7 +457,9 @@ Project settings; see SETTINGS.
 .I .prosefix/cache.json
 .TQ
 .I .prosefix/commas.json
-The decision caches, beside the settings file.
+The decision caches, beside the settings file. They are written at the end of
+a run, and only when a new decision was made; a cache that cannot be saved is
+reported and does not change the exit status.
 .SH EXIT STATUS
 .TP
 .B 0
@@ -468,7 +472,8 @@ found files that would change (with
 files with review items too).
 .TP
 .B 2
-A usage, configuration or input error, a failed write, or a
+A usage, configuration or input error, a failed write, a file that changed
+on disk while prosefix ran (it is left alone), or a
 .B \-\-require
 failure. This wins over 1.
 .PP

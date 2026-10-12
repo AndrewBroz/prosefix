@@ -2,12 +2,13 @@
 
 from __future__ import annotations
 
+import copy
 import os
 import threading
 from dataclasses import dataclass, field
 from pathlib import Path
 
-from adjudicate import Cache, Change, ReviewItem, Skipped, compose
+from adjudicate import Annotation, Cache, Change, ReviewItem, Skipped, compose, derive_changes
 from proofix import api as proof
 from proofix.commas import CommaCache
 from stylefix import api as style
@@ -16,20 +17,40 @@ from stylefix.cli import BUILTIN_ACCEPT
 from .settings import FRONT, PROOF_TIERS, STYLE_TIERS, Settings
 
 
-class SharedCache(Cache):
-    def save(self):            # adjudicate() calls this after every batch; we write once, at the end
+class _Flushable:
+    """Written once, at the end of the run, and only if a decision was added:
+    preview modes and read-only projects never write an unchanged cache."""
+
+    def _mark_clean(self):
+        self._saved = copy.deepcopy(self.data)
+
+    @property
+    def dirty(self) -> bool:
+        return self.data != self._saved
+
+    def save(self):            # the libraries call this after every batch; we write once, at the end
         pass
 
     def flush(self):
-        Cache.save(self)
+        if self.dirty:
+            self._base.save(self)
+            self._mark_clean()
 
 
-class SharedCommaCache(CommaCache):
-    def save(self):
-        pass
+class SharedCache(_Flushable, Cache):
+    _base = Cache
 
-    def flush(self):
-        CommaCache.save(self)
+    def __init__(self, path):
+        Cache.__init__(self, path)
+        self._mark_clean()
+
+
+class SharedCommaCache(_Flushable, CommaCache):
+    _base = CommaCache
+
+    def __init__(self, path):
+        CommaCache.__init__(self, path)
+        self._mark_clean()
 
 
 @dataclass
@@ -37,10 +58,16 @@ class Caches:
     cache: Cache
     commas: CommaCache
 
-    def flush(self):
+    def flush(self) -> list[str]:
+        """Errors, one per file that could not be saved; saving never stops the run."""
+        errors = []
         for c in (self.cache, self.commas):
             if hasattr(c, "flush"):
-                c.flush()
+                try:
+                    c.flush()
+                except OSError as e:
+                    errors.append(f"cannot save decisions to {c.path}: {e.strerror or e}")
+        return errors
 
 
 _LOCK = threading.Lock()
@@ -58,11 +85,13 @@ def caches_for(settings: Settings, mode: str) -> Caches:
         return _OPEN[settings.cache]
 
 
-def flush_all() -> None:
+def flush_all() -> list[str]:
+    errors: list[str] = []
     with _LOCK:
         for c in _OPEN.values():
-            c.flush()
+            errors += c.flush()
         _OPEN.clear()
+    return errors
 
 
 def user_accept() -> tuple[list[str], set[str]]:
@@ -100,15 +129,13 @@ def process(label: str, text: str, settings: Settings, endpoint, caches: Caches,
     proof_accept |= {w.lower() for w in settings.accept}
     review: list[ReviewItem] = []
     skipped: list[Skipped] = []
-    if settings.note:
-        review.append(ReviewItem(1, "note", settings.note, "settings", "prosefix"))
+    style_opts = style.Options(target=settings.target, style=settings.style,
+                               accept=style_accept, parallel=parallel,
+                               skip=settings.skip & frozenset(STYLE_TIERS),
+                               require_vale=False, replay_cache=replay)
     middle, first = body, []
     if "style" in settings.only:
-        r = style.fix(body, style.Options(target=settings.target, style=settings.style,
-                                          accept=style_accept, parallel=parallel,
-                                          skip=settings.skip & frozenset(STYLE_TIERS),
-                                          require_vale=False, replay_cache=replay),
-                      endpoint, caches.cache)
+        r = style.fix(body, style_opts, endpoint, caches.cache)
         middle, first = r.text, r.changes
         review, skipped = review + r.review, skipped + r.skipped
     final, second = middle, []
@@ -121,6 +148,18 @@ def process(label: str, text: str, settings: Settings, endpoint, caches: Caches,
         final, second = r2.text, r2.changes
         review += r2.review
         skipped += r2.skipped
+        if final != middle and "style" in settings.only:
+            # proofix's output is styled again (hygiene can decode "&mdash;" into a dash
+            # stylefix has not seen), so a second run changes nothing. "proofix + restyle"
+            # is the second pass, labelled from both passes' changes.
+            r3 = style.fix(final, style_opts, endpoint, caches.cache)
+            if r3.text != final:
+                seen = {(i.kind, i.message, i.check) for i in review}
+                review += [i for i in r3.review if (i.kind, i.message, i.check) not in seen]
+                skipped += [k for k in r3.skipped if k not in skipped]
+                second = _second_pass(middle, r3.text, [("proofix", c) for c in r2.changes]
+                                      + [("stylefix", c) for c in r3.changes])
+                final = r3.text
     for n, c in enumerate(first, 1):
         c.id = f"s{n}"
     for n, c in enumerate(second, 1):
@@ -132,6 +171,22 @@ def process(label: str, text: str, settings: Settings, endpoint, caches: Caches,
         c.end += shift
     head_lines = head.count("\n")
     review = [ReviewItem(i.line + head_lines, i.kind, i.message, i.check, i.pass_) for i in review]
+    if settings.note:                  # prosefix's own note is about the front matter: line 1
+        review.insert(0, ReviewItem(1, "note", settings.note, "settings", "prosefix"))
     output = head + final
     return FileResult(label, "changed" if output != text else "unchanged", None, settings,
                       text, output, changes, review, skipped)
+
+
+_TAG = "\x00"
+
+
+def _second_pass(middle: str, final: str, tagged) -> list[Change]:
+    """Changes middle -> final, each labelled from the proofix or restyle change
+    it matches and given that pass; a hunk nothing matches is proofix's."""
+    ann = [Annotation(c.before, c.after, f"{origin}{_TAG}{c.check}", c.reason, c.decided_by,
+                      c.confidence) for origin, c in tagged]
+    out = derive_changes(middle, final, ann, f"proofix{_TAG}proofix")
+    for c in out:
+        c.pass_, _, c.check = c.check.partition(_TAG) if _TAG in c.check else ("proofix", "", c.check)
+    return out
