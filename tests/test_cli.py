@@ -179,3 +179,26 @@ def test_stdin_error_still_emits_input(tmp_path, monkeypatch, capsys):
 def test_strict_check_on_clean_note_passes(note):
     main([str(note), "--llm", "none"])
     assert main([str(note), "--check", "--strict", "--llm", "none"]) == 0
+
+
+def _excluding_project(tmp_path):
+    (tmp_path / "prosefix.toml").write_text('exclude = ["drafts/**"]\n')
+    (tmp_path / "drafts").mkdir()
+
+
+def test_stdin_filename_matching_exclude_is_left_alone(tmp_path, monkeypatch, capsys):
+    _excluding_project(tmp_path)
+    monkeypatch.setattr("sys.stdin", io.StringIO(DOC))
+    assert main(["-", "--llm", "none", "--stdin-filename", str(tmp_path / "drafts" / "a.md")]) == 0
+    assert capsys.readouterr().out == DOC
+    monkeypatch.setattr("sys.stdin", io.StringIO(DOC))
+    assert main(["-", "--llm", "none", "--json", "--stdin-filename", str(tmp_path / "drafts" / "a.md")]) == 0
+    entry = json.loads(capsys.readouterr().out)["files"][0]
+    assert entry["status"] == "skipped" and "excluded by" in entry["reason"]
+
+
+def test_stdin_filename_not_excluded_is_still_fixed(tmp_path, monkeypatch, capsys):
+    _excluding_project(tmp_path)
+    monkeypatch.setattr("sys.stdin", io.StringIO(DOC))
+    assert main(["-", "--llm", "none", "--stdin-filename", str(tmp_path / "notes.md")]) == 0
+    assert capsys.readouterr().out != DOC

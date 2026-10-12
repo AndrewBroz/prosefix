@@ -274,6 +274,9 @@ def main(argv=None) -> int:
 
     def run(job: Job) -> engine.FileResult:
         text, settings = job.text, Settings()
+        if job.path is None and args.stdin_filename and _is_excluded(job.lookup):
+            src = find_project(job.lookup).source
+            return engine.FileResult(job.label, "skipped", f"excluded by {src}", settings, text, text)
         try:
             if text is None:
                 try:
