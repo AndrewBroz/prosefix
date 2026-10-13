@@ -44,7 +44,7 @@ prosefix draft.md          # write it
 
 The first in-place run prints `tip: prosefix --diff <path> shows changes without writing them`; it stops once prosefix has a cache directory.
 
-**Without the tools.** A bare `uv tool install prosefix` still fixes the obvious mechanical faults with the `basics` tier, which needs nothing else: a doubled small word (`the the`; other repeats, such as `that that`, go to the model or to review), a space before punctuation (`programme ,`) and a missing space after a comma, semicolon or colon between two words (`analysis,design`). It never touches `1,000`, `10:30`, URLs or code. prosefix then says once, in one line, how to get the rest:
+**Without the tools.** A bare `uv tool install prosefix` still fixes the obvious mechanical faults with the `basics` tier, which needs nothing else: a doubled small word from a closed list (a, an, the, of, to, at, for, with, from, into, onto, and, or, but, nor, it, we, they, my, your, our, their: `the the`), a space before a comma or period (`programme ,`), and a missing space after a comma, semicolon or colon between two words (`analysis,design`). Other repeats (`that that`, `log in in the corner`, `turn it on on Monday`) go to the model or to review, as does a closed-list double LanguageTool ran over without flagging; a hyphen touching either copy (`to to-do`) makes it no double. A space before `: ; ! ?` is removed at the end of a line; with more text after it (`Press : to enter`) it is listed for review. It never touches `1,000`, `10:30`, URLs or code (fenced, inline or indented). prosefix then says once, in one line, how to get the rest:
 
 ```text
 prosefix: most fixes need Vale and LanguageTool — brew install andrewbroz/tap/prosefix (or: brew install vale languagetool typos-cli)

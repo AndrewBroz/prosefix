@@ -46,3 +46,21 @@ def test_nothing_personal_ships():
 
 def test_man_page_asks_for_tbl():
     assert MAN.startswith("'\\\" t\n")          # the man page has tables
+
+
+def _help(option):
+    return next(a.help for a in build_parser()._actions if option in a.option_strings)
+
+
+def test_help_for_target_and_changes_says_what_they_do():
+    assert "detect" in _help("--target")
+    assert "review" in _help("--changes")
+
+
+def test_docs_match_the_basics_tier_and_the_tip():
+    flat = " ".join(PLAIN.split())
+    assert "Nothing is written to remember it" not in flat
+    assert "closed list" in flat and "a, an, the, of, to, at, for, with, from, into, onto" in flat
+    assert "listed for review" in flat.split("Needs nothing.", 1)[1][:900]
+    readme = " ".join((ROOT / "README.md").read_text(encoding="utf-8").split())
+    assert "a, an, the, of, to, at, for, with, from, into, onto" in readme

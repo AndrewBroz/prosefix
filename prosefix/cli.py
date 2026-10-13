@@ -64,7 +64,8 @@ def build_parser() -> argparse.ArgumentParser:
                    help="write nothing; exit 1 if any file would change")
     m.add_argument("--json", action="store_true", help="print proposals as JSON (schema 1); write nothing")
     p.add_argument("--strict", action="store_true", help="with --check, review items also fail")
-    p.add_argument("--target", choices=["us", "uk"], help="English variety")
+    p.add_argument("--target", choices=["us", "uk"],
+                   help="English variety (default: detected from each note's spelling; us if none)")
     p.add_argument("--style", metavar="GUIDE", choices=styleguides.choices(),
                    help="style guide, as stylefix --style: " + ", ".join(styleguides.choices()))
     p.add_argument("--only", choices=PASSES, help="run one pass only")
@@ -78,7 +79,8 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--no-cache", action="store_true", help="neither read nor write the decision cache")
     p.add_argument("--require", metavar="TOOL,...",
                    help="fail (exit 2) if any of vale, languagetool, typos, model is missing")
-    p.add_argument("--changes", action="store_true", help="print every change to stderr")
+    p.add_argument("--changes", action="store_true",
+                   help="print every change and every review item to stderr")
     p.add_argument("--report", type=Path, metavar="FILE", help="write a Markdown report of all files")
     p.add_argument("-q", "--quiet", action="store_true", help="only errors on stderr")
     p.add_argument("-j", "--jobs", type=int, default=4, metavar="N", help="files in parallel (default: %(default)s)")

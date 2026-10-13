@@ -234,8 +234,12 @@ tip: prosefix \-\-diff <path> shows changes without writing them
 .fi
 .RE
 .PP
-once to standard error. Nothing is written to remember it; it stops once
-the cache directory exists.
+once to standard error. Printing it creates the (empty) prosefix cache
+directory,
+.IR $XDG_CACHE_HOME/prosefix
+or
+.IR ~/.cache/prosefix ,
+so it is shown once; it never appears once that directory exists.
 .PP
 Without Vale, LanguageTool or typos, prosefix still fixes the obvious
 mechanical faults with the
@@ -452,15 +456,24 @@ Line endings, trailing whitespace, doubled spaces. No tool needed.
 Grammar and mechanical errors. LanguageTool.
 .TP
 .B basics
-Needs nothing. A doubled small word (the the, of of) is removed; another
-repeat (that that, had had) goes to the model, or is listed for review
-without one. When LanguageTool's mechanical pass will not run (LanguageTool
+Needs nothing. A doubled word from the closed list (a, an, the, of, to,
+at, for, with, from, into, onto, and, or, but, nor, it, we, they, my, your,
+our, their) is removed, unless LanguageTool's mechanical pass ran and did
+not flag it; then, like any other repeat (that that, had had, log in in the
+corner, turn it on on Monday), it goes to the model, or is listed for review
+without one. A hyphen touching either copy (to to\-do, for for\-profit) makes
+it no double. When LanguageTool's mechanical pass will not run (LanguageTool
 missing, or
 .B mechanical
-skipped), basics also removes a space before , . ; : ! ? (not before ...)
-and adds a missing space after , ; : between two letters
+skipped), basics also removes a space before a comma or period (not before
+\&...), removes a space before ; : ! ? at the end of a line or before a
+closing bracket or quote (with more text after it on the line, as in
+.IR "Press : to enter" ,
+it is listed for review), and adds a missing space after , ; : between two
+letters
 .RI ( analysis,design ).
-Never between digits (1,000, 10:30, 3:2), in URLs, code or protected text.
+Never between digits (1,000, 10:30, 3:2), in URLs, code (fenced, inline or
+indented) or protected text.
 .TP
 .B typos
 Misspellings. typos.
