@@ -251,6 +251,7 @@ def process(label: str, text: str, settings: Settings, endpoint, caches: Caches,
         c.end += shift
     head_lines = head.count("\n")
     review = [ReviewItem(i.line + head_lines, i.kind, i.message, i.check, i.pass_) for i in review]
+    review.sort(key=lambda i: i.line)             # stable: each pass's order kept within a line
     if settings.note:                  # prosefix's own note is about the front matter: line 1
         review.insert(0, ReviewItem(1, "note", settings.note, "settings", "prosefix"))
     output = head + final

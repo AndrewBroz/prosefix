@@ -225,8 +225,11 @@ _CONTEXT = 12
 
 
 def _window(text: str, start: int, end: int) -> tuple[str, str]:
-    """Up to _CONTEXT characters either side of text[start:end], cut back to word boundaries."""
-    lo, hi = max(0, start - _CONTEXT), min(len(text), end + _CONTEXT)
+    """Up to _CONTEXT characters either side of text[start:end], cut back to word boundaries,
+    never past a line break."""
+    eol = text.find("\n", end)
+    lo = max(0, start - _CONTEXT, text.rfind("\n", 0, start) + 1)
+    hi = min(len(text), end + _CONTEXT, len(text) if eol < 0 else eol)
     left, right = text[lo:start], text[end:hi]
     if lo > 0 and not text[lo - 1].isspace() and left and not left[0].isspace():
         left = re.sub(r"^\S+", "", left).lstrip()
@@ -445,7 +448,9 @@ def _main(argv=None) -> int:
     missing.sort(key=lambda n: ("vale", "languagetool", "typos-cli").index(n)
                  if n in ("vale", "languagetool", "typos-cli") else 9)
     if not (args.quiet or args.json):
-        if missing:
+        if missing == ["typos-cli"]:
+            _err("known-misspelling fixes need typos \u2014 brew install typos-cli")
+        elif missing:
             _err("most fixes need Vale and LanguageTool \u2014 brew install andrewbroz/tap/prosefix "
                  f"(or: brew install {' '.join(missing)})")
         for s in skipped.values():

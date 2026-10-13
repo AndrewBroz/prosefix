@@ -370,7 +370,13 @@ def test_change_line_has_context_window():
     s = nl.index("colour")
     c = NS(start=s, end=s + 6, before="colour", after="color", pass_="stylefix", check="C",
            decided_by="rule", reason="")
-    assert "sentence.\u23cecolour here" in _change_line("f.md", 2, c, nl)
+    # the window stops at a line break on either side (final review, minor 7)
+    assert "'colour here and' -> 'color here and'" in _change_line("f.md", 2, c, nl)
+    two = "first line ends\nthe the\nnext line"
+    s = two.index("the the")
+    c = NS(start=s + 3, end=s + 7, before=" the", after="", pass_="proofix", check="C",
+           decided_by="rule", reason="")
+    assert "'the the' -> 'the'" in _change_line("f.md", 2, c, two)
 
 
 def test_one_tools_line_and_one_model_line(tmp_path, capsys, monkeypatch):
@@ -474,3 +480,45 @@ def test_no_evidence_keeps_using_en_us_note(tmp_path, capsys):
     p.write_text("Plain words -- only.\n")
     main([str(p), "--json", "--llm", "none"])
     assert "variety_conversion" not in json.loads(capsys.readouterr().out)["files"][0]["settings"]
+
+
+def test_only_typos_missing_gets_its_own_line(note, monkeypatch, capsys):
+    from adjudicate import Skipped
+    from prosefix import engine
+    real = engine.process
+
+    def no_typos(*a, **k):
+        r = real(*a, **k)
+        r.skipped = [Skipped("known-misspelling fixes", "typos not found", "brew install typos-cli")]
+        return r
+    monkeypatch.setattr(engine, "process", no_typos)
+    main([str(note), "--llm", "none", "--diff"])
+    err = capsys.readouterr().err
+    assert "prosefix: known-misspelling fixes need typos \u2014 brew install typos-cli" in err
+    assert "most fixes need Vale and LanguageTool" not in err
+
+
+def test_review_items_sorted_by_line(monkeypatch):
+    from adjudicate import ReviewItem
+    from prosefix import engine
+    from prosefix.settings import Settings
+    real_style, real_proof = engine.style.fix, engine.proof.fix
+
+    def style_fix(*a, **k):
+        r = real_style(*a, **k)
+        r.review = [ReviewItem(3, "alert", "style on 3", "S", "stylefix")] + r.review
+        return r
+
+    def proof_fix(*a, **k):
+        r = real_proof(*a, **k)
+        r.review = [ReviewItem(1, "alert", "proof on 1", "P", "proofix"),
+                    ReviewItem(2, "alert", "proof on 2", "P", "proofix")] + r.review
+        return r
+    monkeypatch.setattr(engine.style, "fix", style_fix)
+    monkeypatch.setattr(engine.proof, "fix", proof_fix)
+    monkeypatch.setenv("PATH", "/nonexistent")
+    s = Settings(target="us")
+    r = engine.process("t.md", "a\nb\nc\n", s, None, engine.caches_for(s, "off"), replay=False)
+    lines = [i.line for i in r.review]
+    assert lines == sorted(lines) and [i.message for i in r.review][:3] == [
+        "proof on 1", "proof on 2", "style on 3"]
