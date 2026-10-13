@@ -428,3 +428,25 @@ def test_undecided_variety_leaves_both_spellings():
     assert "colour" in r.output and "theatre" in r.output
     assert not [i for i in r.review if "Variant" in i.check]
     assert "color" in run(text, target="us").output
+
+
+def test_model_removed_double_is_labelled_by_the_model(monkeypatch):
+    from adjudicate.llm import Endpoint
+
+    class First(Endpoint):
+        def __init__(self):
+            super().__init__(url="http://x/v1", model="m")
+
+        def chat(self, system, user, timeout=None, json_mode=True):
+            if "comma placement" in system:
+                return json.dumps({"changed": [], "notes": []})
+            ids = [int(l.split()[1]) for l in user.splitlines() if l.startswith("Item ")]
+            return json.dumps({"decisions": [{"id": i, "choice": 1, "confidence": 0.95,
+                                              "reason": "one copy"} for i in ids]})
+    monkeypatch.setenv("PATH", "/nonexistent")
+    s = Settings(target="us")
+    r = engine.process("t.md", "How do you know that that is wrong?\n", s, First(),
+                       engine.caches_for(s, "off"), replay=False)
+    assert r.output == "How do you know that is wrong?\n"
+    [c] = r.changes
+    assert (c.pass_, c.check, c.decided_by, c.reason) == ("proofix", "adjudicated", "model", "one copy")
