@@ -2,14 +2,18 @@
 
 from __future__ import annotations
 
+import contextlib
 import copy
 import os
+import shutil
+import signal
 import threading
 from dataclasses import dataclass, field
 from pathlib import Path
 
 from adjudicate import Annotation, Cache, Change, ReviewItem, Skipped, compose, derive_changes
 from proofix import api as proof
+from proofix import lt as proof_lt
 from proofix.commas import CommaCache
 from stylefix import api as style
 from stylefix.cli import BUILTIN_ACCEPT
@@ -94,6 +98,57 @@ def flush_all() -> list[str]:
     return errors
 
 
+class LanguageToolRunner:
+    """One languagetool-server for the whole run, shared by every worker.
+
+    Started on the first file that will ask LanguageTool, at most once (under a lock).
+    If it cannot start, `warn` gets the fallback line once and every file uses the
+    command line. close() stops it; the CLI calls it however the run ends."""
+
+    def __init__(self, warn):
+        self._warn = warn
+        self._lock = threading.Lock()
+        self._stack = contextlib.ExitStack()
+        self._server = None
+        self._given_up = os.environ.get("PROSEFIX_NO_LT_SERVER", "") not in ("", "0")
+        self._closed = False
+
+    @staticmethod
+    def wanted(settings: Settings) -> bool:
+        """This file's proof pass will run LanguageTool."""
+        return ("proof" in settings.only and not settings.off
+                and not {"mechanical", "adjudicated"} <= settings.skip
+                and proof_lt.find_languagetool() is not None)
+
+    def server(self, settings: Settings):
+        """The running server for this file, or None: use the command line."""
+        if self._given_up or not self.wanted(settings):
+            return None
+        with self._lock:
+            if self._server is None and not (self._given_up or self._closed):
+                if not shutil.which("languagetool-server"):
+                    self._given_up = True
+                    return None
+                try:
+                    self._server = self._stack.enter_context(proof_lt.LanguageToolServer())
+                except proof_lt.LTError as e:
+                    self._given_up = True
+                    self._warn(f"LanguageTool server did not start ({e}); using the command line")
+            return self._server
+
+    def close(self) -> None:
+        with self._lock:
+            self._closed = True
+            server, self._server = self._server, None
+            try:
+                self._stack.close()
+            except BaseException:          # a second Ctrl-C while it stops: kill it outright
+                if server is not None and server.process.poll() is None:
+                    server._signal(signal.SIGKILL)
+                    server.process.wait(timeout=5)
+                raise
+
+
 def user_accept() -> tuple[list[str], set[str]]:
     words: list[str] = []
     cfg = Path(os.environ.get("XDG_CONFIG_HOME") or Path.home() / ".config")
@@ -118,7 +173,7 @@ class FileResult:
 
 
 def process(label: str, text: str, settings: Settings, endpoint, caches: Caches,
-            replay: bool, parallel: int = 4) -> FileResult:
+            replay: bool, parallel: int = 4, lt: LanguageToolRunner | None = None) -> FileResult:
     if settings.off:
         return FileResult(label, "skipped", "prosefix: off", settings, text, text)
     m = FRONT.match(text)
@@ -143,8 +198,10 @@ def process(label: str, text: str, settings: Settings, endpoint, caches: Caches,
         r2 = proof.fix(middle, proof.Options(target=settings.target, accept=frozenset(proof_accept),
                                              style=settings.style or "none", parallel=parallel,
                                              skip=settings.skip & frozenset(PROOF_TIERS),
-                                             replay_cache=replay),
-                       endpoint, caches.cache, caches.commas)
+                                             replay_cache=replay,
+                                             oxford_ize=False),   # uk means -ise in every guide
+                       endpoint, caches.cache, caches.commas,
+                       lt_server=lt.server(settings) if lt is not None else None)
         final, second = r2.text, r2.changes
         review += r2.review
         skipped += r2.skipped

@@ -383,7 +383,8 @@ def main(argv=None) -> int:
         except SettingsError as e:
             return engine.FileResult(job.label, "error", str(e), settings, text or "", text or "")
         try:
-            return engine.process(job.label, text, settings, ep, engine.caches_for(settings, mode), replay)
+            return engine.process(job.label, text, settings, ep, engine.caches_for(settings, mode), replay,
+                                  lt=runner)
         except Exception as e:                               # one bad file must not sink the run
             msg = f"{type(e).__name__}: {e}"
             return engine.FileResult(job.label, "error", msg, settings, text, text)
@@ -393,10 +394,16 @@ def main(argv=None) -> int:
             and all(j.path is not None for j in jobs):
         first_run = not _user_cache_dir().exists()
 
+    runner = engine.LanguageToolRunner(_err)
     try:
         with ThreadPoolExecutor(max_workers=max(1, args.jobs)) as pool:
-            results = list(pool.map(run, jobs))
-    finally:                          # decisions already paid for survive Ctrl-C or a crash
+            try:
+                results = list(pool.map(run, jobs))
+            except BaseException:     # Ctrl-C or a crash: files not yet started are not started
+                pool.shutdown(wait=False, cancel_futures=True)
+                raise
+    finally:                          # decisions already paid for survive Ctrl-C or a crash,
+        runner.close()                # and the LanguageTool server never outlives the run
         if mode != "off":
             for msg in engine.flush_all():
                 _err(msg)

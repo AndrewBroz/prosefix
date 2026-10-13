@@ -300,7 +300,7 @@ def test_decisions_are_saved_when_the_run_is_interrupted(tmp_path):
     p = tmp_path / "n.md"
     p.write_text(DOC)
 
-    def process(label, text, settings, endpoint, caches, replay, parallel=4):
+    def process(label, text, settings, endpoint, caches, replay, parallel=4, lt=None):
         caches.cache.data["k"] = {"word": "color", "choice": "colour"}     # a paid decision
         raise KeyboardInterrupt
     import unittest.mock
@@ -351,7 +351,7 @@ def test_many_files_hint_instead_of_items(tmp_path, capsys):
 
 def test_changes_lists_review_after_changes(tmp_path, capsys):
     p = tmp_path / "n.md"
-    p.write_text("The color is here. I had had enough of it.\n")
+    p.write_text("The \"color\" is here. I had had enough of it.\n")     # quotes curl without tools
     main([str(p), "--llm", "none", "--target", "uk", "--changes"])
     err = capsys.readouterr().err
     assert err.index("->") < err.index("review —")

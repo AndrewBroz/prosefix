@@ -1,7 +1,7 @@
 [project]
 name = "prosefix"
-version = "0.1.0"
-description = "Clean, consistent prose in Markdown: stylefix's spelling and style guide plus proofix's typos, punctuation and commas, in one command."
+version = "0.2.0"
+description = "Fix spelling, style, typos and punctuation in Markdown files, in place."
 readme = "README.md"
 requires-python = ">=3.11"
 license = "MIT"

@@ -13,7 +13,7 @@ import yaml
 
 PASSES = ("style", "proof")
 STYLE_TIERS = ("variety", "guide", "ambiguous", "numbers", "serial-comma", "abbreviations", "punctuation")
-PROOF_TIERS = ("hygiene", "mechanical", "typos", "adjudicated", "compounds", "commas")
+PROOF_TIERS = ("hygiene", "mechanical", "basics", "typos", "adjudicated", "compounds", "commas")
 TIERS = STYLE_TIERS + PROOF_TIERS
 SETTINGS_FILES = ("prosefix.toml", ".prosefix.toml")
 FRONT = re.compile(r"\A\ufeff?---\r?\n(.*?)\r?\n---\r?\n", re.S)

@@ -1,7 +1,7 @@
 '\" t
-.TH PROSEFIX 1 "October 2026" "prosefix 0.1.0" "User Commands"
+.TH PROSEFIX 1 "October 2026" "prosefix 0.2.0" "User Commands"
 .SH NAME
-prosefix \- clean, consistent prose in Markdown: spelling, style, typos, punctuation and commas in one command
+prosefix \- fix spelling, style, typos and punctuation in Markdown files, in place
 .SH SYNOPSIS
 .B prosefix
 .RI [ options ]
@@ -16,7 +16,32 @@ prosefix \- clean, consistent prose in Markdown: spelling, style, typos, punctua
 .BR \-\-setup " | " \-\-check\-endpoint " | " \-\-doctor
 .SH DESCRIPTION
 .B prosefix
-makes Markdown read as clean, consistent prose. For each file it runs two
+fixes spelling, style, typos and punctuation in Markdown files, in place.
+.PP
+.RS
+.nf
+prosefix draft.md
+prosefix draft.md \-\-diff
+prosefix vault/ \-\-check
+.fi
+.RE
+.PP
+The first rewrites the file, the second shows the changes without writing
+them, and the third writes nothing and exits 1 if any file would change.
+.PP
+prosefix applies a fix only when it is always right; when judgement is
+needed it asks the model; anything uncertain is listed for you. A fix that
+is always right (a known misspelling, a space before a comma,
+.IR "the the" )
+is applied outright. One that needs judgement goes to the model with its
+sentence and a closed set of choices, one of which is always to keep the
+text as written, and is applied only when the model is confident. Anything
+else (no model, the model unsure, or no single right fix) becomes a
+.B review item
+with its reason; see
+.BR "REVIEW ITEMS" .
+.PP
+For each file prosefix runs two
 passes in one process, with one model endpoint, one decision cache and one
 change list. The
 .B style
@@ -115,8 +140,9 @@ files that have review items also count (exit 1). It is an error without
 .SS What to do
 .TP
 .BR \-\-target " " {us|uk}
-English variety. Default
-.BR us .
+English variety. Without it, and without a project or front matter target,
+each note's own spelling decides; see
+.BR VARIETY .
 .TP
 .B \-\-style \fIGUIDE\fR
 Style guide, as stylefix's
@@ -166,13 +192,15 @@ is missing, instead of skipping what needs it.
 .SS Reporting
 .TP
 .B \-\-changes
-Print every change to standard error, one per line.
+Print every change to standard error, one per line, with up to 12
+characters of context either side, then the file's review items.
 .TP
 .B \-\-report \fIFILE\fR
 Write one Markdown report covering all files.
 .TP
 .BR \-q ", " \-\-quiet
-Only errors on standard error: no summary, no "skipped" lines.
+Only errors on standard error: no summary, no review items, no tip and no
+lines about missing tools or a missing model.
 .TP
 .BR \-j ", " \-\-jobs " " \fIN\fR
 Files processed in parallel. Default 4. Workers share one in-memory cache,
@@ -197,10 +225,97 @@ Print the version and exit.
 .TP
 .BR \-h ", " \-\-help
 Print the usage summary and exit.
+.SH FIRST RUN
+A first in-place run (no prosefix cache directory yet) prints
 .PP
-When a capability is unavailable, one line per run (not per file) goes to
-standard error, for example
-.IR "prosefix: skipped variety spelling (Vale not found: brew install vale)" .
+.RS
+.nf
+tip: prosefix \-\-diff <path> shows changes without writing them
+.fi
+.RE
+.PP
+once to standard error. Nothing is written to remember it; it stops once
+the cache directory exists.
+.PP
+Without Vale, LanguageTool or typos, prosefix still fixes the obvious
+mechanical faults with the
+.B basics
+tier (see
+.BR TIERS ),
+and says once, in one line, how to get the rest:
+.PP
+.RS
+.nf
+prosefix: most fixes need Vale and LanguageTool \(em brew install andrewbroz/tap/prosefix (or: brew install vale languagetool typos\-cli)
+.fi
+.RE
+.PP
+The parenthesis names only the tools that are missing. Without a model, one
+more line says
+.IR "prosefix: model decisions and comma placement need a model \(em prosefix \-\-setup" .
+Other unavailable capabilities get one line per run (not per file), in the form
+.IR "prosefix: skipped WHAT (WHY: FIX)" .
+.SH VARIETY
+When nothing sets the target (no
+.BR \-\-target ,
+no project
+.BR target ,
+no front matter
+.B prosefix.target
+or
+.BR lang ),
+prosefix keeps the variety the note is already written in. It counts the
+distinct words, in prose outside code and quotation marks, that only one
+variety spells that way (colour, programme against color, program).
+Capitalised words, words in the accept lists and words both varieties accept
+do not count, and a word counts once however often it appears. Two or more
+UK words and at least twice as many UK as US words mean UK; two or more US
+words and at least twice as many US as UK words mean US. Otherwise the target is US. The
+per-file line says which:
+.PP
+.RS
+.nf
+prosefix: draft.md: en\-GB (detected) \(pc 6 change(s), 4 for review
+prosefix: draft.md: no clear variety (1 UK, 1 US words); using en\-US \(em set \-\-target or lang: \(pc 1 change(s), 0 for review
+.fi
+.RE
+.PP
+Each file is decided on its own. To override, pass
+.BR \-\-target ,
+set
+.B target
+in the project file, or set
+.B lang
+or
+.B prosefix.target
+in the note's front matter.
+.SH REVIEW ITEMS
+A review item is something prosefix did not apply and you may want to look
+at, printed as
+.PP
+.RS
+.nf
+draft.md:5: review \(em A comma may be missing after the conjunctive/linking adverb \(oqHowever\(cq. [proofix SENT_START_CONJUNCTIVE_LINKING_ADVERB_COMMA]
+.fi
+.RE
+.PP
+When the run's input is exactly one file (or standard input), its review
+items go to standard error after the summary, also with
+.BR \-\-diff .
+With several files, each file's line counts them and the total line adds
+.I (\-\-changes lists them)
+when there are any;
+.B \-\-changes
+prints them after each file's changes, and
+.B \-\-report
+writes them to its file.
+.B \-q
+prints none.
+.PP
+The per-file and total lines go to standard output when the files are on
+disk, and to standard error when standard input is read (standard output then
+carries the text). Changes, review items, the tip and the lines about missing
+tools always go to standard error.
 .SH SETTINGS
 For each file, prosefix looks upward from the file's directory for
 .IR prosefix.toml ,
@@ -286,6 +401,8 @@ the note is processed with project settings; a
 review item says why.
 .PP
 Precedence: command-line flags, then front matter, then the project file,
+then the note's own spelling (see
+.BR VARIETY ),
 then the defaults (US English, the default guide for the target). Accept
 lists are merged: stylefix's built-in list,
 .IR ~/.config/stylefix/accept.txt ,
@@ -330,6 +447,17 @@ Line endings, trailing whitespace, doubled spaces. No tool needed.
 .B mechanical
 Grammar and mechanical errors. LanguageTool.
 .TP
+.B basics
+Needs nothing. A doubled small word (the the, of of) is removed; another
+repeat (that that, had had) goes to the model, or is listed for review
+without one. When LanguageTool's mechanical pass will not run (LanguageTool
+missing, or
+.B mechanical
+skipped), basics also removes a space before , . ; : ! ? (not before ...)
+and adds a missing space after , ; : between two letters
+.RI ( analysis,design ).
+Never between digits (1,000, 10:30, 3:2), in URLs, code or protected text.
+.TP
 .B typos
 Misspellings. typos.
 .TP
@@ -350,7 +478,7 @@ prints one UTF\-8 document:
 .PP
 .RS
 .nf
-{"schema": 1, "prosefix": "0.1.0",
+{"schema": 1, "prosefix": "0.2.0",
  "endpoint": {"url", "model", "source"} or null,
  "skipped": [{"what", "why", "fix"}],
  "files": [{"path", "status", "reason", "settings",
@@ -371,6 +499,17 @@ and no
 .B changes
 or
 .BR output ).
+.B settings
+holds
+.BR target ,
+.BR style ,
+.BR only ,
+.B skip
+and
+.B target_source
+(flag, front matter, lang, project, detected or default), plus
+\fBdetected\fR ({"uk": \fIn\fR, "us": \fIm\fR})
+when the note's spelling was counted.
 Each change has
 .BR id " (s1... for stylefix, p1... for proofix),"
 .BR pass ,
@@ -440,6 +579,17 @@ Replaces ~/.config. The accept lists and config files are read from it.
 .TP
 .B XDG_CACHE_HOME
 Replaces ~/.cache for the decision cache used when there is no project settings file.
+.TP
+.B PROSEFIX_NO_LT_SERVER
+Set to 1 to use LanguageTool's command line for every file instead of one
+local server for the run. Normally, when
+.B languagetool\-server
+is installed, prosefix starts it on the first file that needs LanguageTool,
+on a free port on 127.0.0.1 only, shares it between all files, and stops it
+when the run ends, including on errors and Ctrl\-C. If it does not start
+within 30 seconds, prosefix prints
+.I "prosefix: LanguageTool server did not start (REASON); using the command line"
+once and carries on. For diagnosis and tests.
 .SH FILES
 .TP
 .I ~/.config/prosefix/config.toml
@@ -479,7 +629,24 @@ failure. This wins over 1.
 .PP
 A missing tool is never an error unless required.
 .SH EXAMPLES
-Rewrite a note, or a whole Obsidian vault, in place, previewing first:
+A first look at one draft, then the rewrite:
+.PP
+.RS
+.nf
+prosefix draft.md \-\-diff
+prosefix draft.md
+.fi
+.RE
+.PP
+Rewrite a whole Obsidian vault, listing every change and review item:
+.PP
+.RS
+.nf
+prosefix vault/ \-\-changes
+.fi
+.RE
+.PP
+Preview a whole Obsidian vault, then rewrite it in place:
 .PP
 .RS
 .nf

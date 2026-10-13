@@ -169,3 +169,158 @@ def test_second_run_over_the_example_vault_changes_nothing(tmp_path, target):
         assert once.status == "changed"
         twice = engine.process(p.name, once.output, s, None, engine.caches_for(s, "off"), replay=False)
         assert twice.output == once.output, (p.name, [(c.before, c.after, c.pass_, c.check) for c in twice.changes])
+
+
+# One LanguageTool server per run --------------------------------------------------------
+
+import os
+import time
+
+import proofix.lt
+from prosefix import cli
+from prosefix.cli import main
+from prosefix.settings import PROOF_TIERS
+
+needs_server = pytest.mark.skipif(not (shutil.which("languagetool-server") and shutil.which("languagetool")),
+                                  reason="no languagetool-server")
+
+
+def _alive(pid: int) -> bool:
+    """The server's process group (the launcher and its JVM) still has a member."""
+    try:
+        os.killpg(pid, 0)
+    except ProcessLookupError:
+        return False
+    except PermissionError:
+        return True
+    return True
+
+
+def _record_servers(monkeypatch) -> list[int]:
+    pids: list[int] = []
+    real = proofix.lt.LanguageToolServer.__enter__
+
+    def enter(self):
+        out = real(self)
+        pids.append(self.process.pid)
+        return out
+    monkeypatch.setattr(proofix.lt.LanguageToolServer, "__enter__", enter)
+    return pids
+
+
+def _raise_on_call(monkeypatch, owner, name: str, n: int, exc: BaseException):
+    """owner.name raises exc on its n-th call; the calls before it are real."""
+    real, calls, lock = getattr(owner, name), [], threading.Lock()
+
+    def wrapper(*a, **kw):
+        with lock:
+            calls.append(1)
+            k = len(calls)
+        if k == n:
+            raise exc
+        return real(*a, **kw)
+    monkeypatch.setattr(owner, name, wrapper)
+
+
+@needs_server
+def test_one_server_for_many_files(tmp_path, monkeypatch):
+    pids = _record_servers(monkeypatch)
+    for i in range(3):
+        (tmp_path / f"{i}.md").write_text("We recieved the the scheme.\n")
+    assert main([str(tmp_path), "--llm", "none", "--target", "us"]) == 0
+    assert len(pids) == 1
+    assert not _alive(pids[0])
+    assert (tmp_path / "0.md").read_text() == "We received the scheme.\n"
+
+
+@needs_server
+def test_server_stopped_after_exception(tmp_path, monkeypatch):
+    pids = _record_servers(monkeypatch)
+    for i in range(2):
+        (tmp_path / f"{i}.md").write_text("We recieved the scheme.\n")
+    # the second file's settings blow up after the first file has started the server
+    _raise_on_call(monkeypatch, cli, "resolve", 2, RuntimeError("boom"))
+    with pytest.raises(RuntimeError):
+        main([str(tmp_path), "--llm", "none", "--target", "us", "-j", "1"])
+    assert pids and not _alive(pids[0])
+
+
+@needs_server
+def test_server_stopped_on_ctrl_c(tmp_path, monkeypatch):
+    pids = _record_servers(monkeypatch)
+    for i in range(6):
+        (tmp_path / f"{i}.md").write_text("We recieved the scheme.\n")
+    _raise_on_call(monkeypatch, engine, "process", 2, KeyboardInterrupt())
+    with pytest.raises(KeyboardInterrupt):
+        main([str(tmp_path), "--llm", "none", "--target", "us", "-j", "2"])
+    assert pids and not any(_alive(p) for p in pids)
+
+
+def test_server_fallback_message(tmp_path, monkeypatch, capsys):
+    monkeypatch.setattr(proofix.lt, "SERVER_START_TIMEOUT", 0.01)
+    for i in range(3):
+        (tmp_path / f"{i}.md").write_text("We recieved the scheme.\n")
+    main([str(tmp_path), "--llm", "none", "--target", "us"])
+    err = capsys.readouterr().err
+    have = bool(shutil.which("languagetool-server") and shutil.which("languagetool"))
+    assert err.count("prosefix: LanguageTool server did not start (") == (1 if have else 0)
+    if have:
+        assert "; using the command line" in err
+        assert (tmp_path / "0.md").read_text() == "We received the scheme.\n"    # the command line did it
+
+
+def test_no_server_when_switched_off_or_not_needed(tmp_path, monkeypatch):
+    starts = []
+    monkeypatch.setattr(proofix.lt.LanguageToolServer, "__enter__",
+                        lambda self: starts.append(1) or (_ for _ in ()).throw(AssertionError("started")))
+    (tmp_path / "n.md").write_text("We recieved the scheme.\n")
+    monkeypatch.setenv("PROSEFIX_NO_LT_SERVER", "1")
+    main([str(tmp_path / "n.md"), "--llm", "none", "--target", "us", "--diff"])
+    monkeypatch.delenv("PROSEFIX_NO_LT_SERVER")
+    main([str(tmp_path / "n.md"), "--llm", "none", "--only", "style", "--diff"])
+    main([str(tmp_path / "n.md"), "--llm", "none", "--skip", "mechanical,adjudicated", "--diff"])
+    assert starts == []
+
+
+def test_proof_options_and_server_passed(monkeypatch):
+    seen = {}
+    real = engine.proof.fix
+
+    def fix(text, options, endpoint, cache, commas, lt_server=None):
+        seen.update(options=options, lt_server=lt_server)
+        return real(text, options, endpoint, cache, commas)
+    monkeypatch.setattr(engine.proof, "fix", fix)
+
+    class Runner:
+        def server(self, settings):
+            return "SERVER"
+    s = Settings(target="uk")
+    engine.process("t.md", "Text.\n", s, None, engine.caches_for(s, "off"), replay=False, lt=Runner())
+    assert seen["options"].oxford_ize is False and seen["lt_server"] == "SERVER"
+
+
+def test_basics_is_a_proof_tier(tmp_path, capsys):
+    assert "basics" in PROOF_TIERS
+    p = tmp_path / "n.md"
+    p.write_text("We need analysis,design and testing.\n")
+    assert main([str(p), "--llm", "none", "--only", "proof", "--skip",
+                 "basics,mechanical,adjudicated,typos", "--diff"]) == 0
+    assert capsys.readouterr().out == ""
+
+
+@needs_server
+def test_server_killed_when_interrupted_while_stopping(tmp_path, monkeypatch):
+    pids = _record_servers(monkeypatch)
+
+    def interrupted(self, *exc):          # Ctrl-C arrives while the server is being stopped
+        raise KeyboardInterrupt
+    monkeypatch.setattr(proofix.lt.LanguageToolServer, "__exit__", interrupted)
+    (tmp_path / "n.md").write_text("We recieved the scheme.\n")
+    with pytest.raises(KeyboardInterrupt):
+        main([str(tmp_path / "n.md"), "--llm", "none", "--target", "us"])
+    assert pids
+    for _ in range(50):
+        if not _alive(pids[0]):
+            break
+        time.sleep(0.1)
+    assert not _alive(pids[0])
