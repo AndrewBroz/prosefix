@@ -195,15 +195,20 @@ def process(label: str, text: str, settings: Settings, endpoint, caches: Caches,
     proof_accept |= {w.lower() for w in settings.accept}
     review: list[ReviewItem] = []
     skipped: list[Skipped] = []
+    style_skip = settings.skip & frozenset(STYLE_TIERS)
+    if not settings.variety_conversion:
+        # no clear variety: stylefix's variety tiers (spellings, and words whose spelling
+        # depends on sense) are skipped for this file, and its review of spellings from
+        # the other variety is not shown: both varieties are as the writer left them
+        style_skip |= VARIETY_TIERS
     style_opts = style.Options(target=settings.target, style=settings.style,
-                               accept=style_accept, parallel=parallel,
-                               skip=settings.skip & frozenset(STYLE_TIERS),
+                               accept=style_accept, parallel=parallel, skip=style_skip,
                                require_vale=False, replay_cache=replay)
     middle, first = body, []
     if "style" in settings.only:
         r = style.fix(body, style_opts, endpoint, caches.cache)
         middle, first = r.text, r.changes
-        review, skipped = review + r.review, skipped + r.skipped
+        review, skipped = review + _style_review(r.review, settings), skipped + r.skipped
     final, second = middle, []
     if "proof" in settings.only:
         proof_opts = proof.Options(target=settings.target, accept=frozenset(proof_accept),
@@ -229,7 +234,8 @@ def process(label: str, text: str, settings: Settings, endpoint, caches: Caches,
             r3 = style.fix(final, style_opts, endpoint, caches.cache)
             if r3.text != final:
                 seen = {(i.kind, i.message, i.check) for i in review}
-                review += [i for i in r3.review if (i.kind, i.message, i.check) not in seen]
+                review += [i for i in _style_review(r3.review, settings)
+                           if (i.kind, i.message, i.check) not in seen]
                 skipped += [k for k in r3.skipped if k not in skipped]
                 second = _second_pass(middle, r3.text, [("proofix", c) for c in r2.changes]
                                       + [("stylefix", c) for c in r3.changes])
@@ -250,6 +256,17 @@ def process(label: str, text: str, settings: Settings, endpoint, caches: Caches,
     output = head + final
     return FileResult(label, "changed" if output != text else "unchanged", None, settings,
                       text, output, changes, review, skipped)
+
+
+VARIETY_TIERS = frozenset({"variety", "ambiguous"})
+
+
+def _style_review(review: list[ReviewItem], settings: Settings) -> list[ReviewItem]:
+    """stylefix's review items, less its other-variety spelling notes ("'colour' looks like
+    a UK spelling.") when variety conversion is off for the file."""
+    if settings.variety_conversion:
+        return review
+    return [i for i in review if not (i.check.startswith("Spelling.") and i.check.endswith("Variant"))]
 
 
 _TAG = "\x00"

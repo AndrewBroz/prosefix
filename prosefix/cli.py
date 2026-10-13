@@ -281,6 +281,9 @@ def _variety_note(s) -> str:
     if s.target_source == "detected":
         return f"{'en-GB' if s.target == 'uk' else 'en-US'} (detected) \u00b7 "
     if s.target_source == "default" and s.detected is not None:
+        if not s.variety_conversion:
+            return (f"no clear variety ({s.detected[0]} UK, {s.detected[1]} US words); variety "
+                    "spellings left alone \u2014 set --target or lang: \u00b7 ")
         return (f"no clear variety ({s.detected[0]} UK, {s.detected[1]} US words); using en-US "
                 "\u2014 set --target or lang: \u00b7 ")
     return ""

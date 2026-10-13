@@ -182,3 +182,16 @@ def test_project_target_beats_detection(tmp_path):
 def test_other_lang_does_not_set_target_so_detection_runs(tmp_path):
     s = resolve(tmp_path / "n.md", "---\nlang: en-AU\n---\n" + UK, {}, proj(tmp_path, ""))
     assert (s.target, s.target_source) == ("uk", "detected")
+
+
+def test_undecided_variety_skips_variety_conversion(tmp_path):
+    s = resolve(tmp_path / "n.md", "The colour and the flavor.\n", {}, proj(tmp_path, ""))
+    assert (s.target, s.target_source, s.detected) == ("us", "default", (1, 1))
+    assert s.variety_conversion is False
+
+
+def test_no_evidence_or_a_set_variety_converts(tmp_path):
+    assert resolve(tmp_path / "n.md", "Plain words only.\n", {}, proj(tmp_path, "")).variety_conversion
+    assert resolve(tmp_path / "n.md", UK, {}, proj(tmp_path, "")).variety_conversion
+    s = resolve(tmp_path / "n.md", "The colour and the flavor.\n", {"target": "us"}, proj(tmp_path, ""))
+    assert s.variety_conversion

@@ -48,6 +48,9 @@ class Settings:
     note: str | None = None
     target_source: str = "default"
     detected: tuple[int, int] | None = None       # (uk, us) word counts, when detection ran
+    # False when detection found words of both varieties but no clear majority: the US
+    # default stands for everything else, but variety spellings are left as written.
+    variety_conversion: bool = True
 
 
 def _validate(table, where: str, allowed: tuple[str, ...]) -> dict:
@@ -174,11 +177,13 @@ def resolve(path: Path | None, text: str, flags: dict, project: Project) -> Sett
     if project.root and "accept_file" in v:
         accept += _read_accept_file(project, v["accept_file"])
     detected = None
+    convert = True
     if source is None:
         from stylefix.api import detect_variety
         d = detect_variety(FRONT.sub("", text, count=1), accept=accept)
         v["target"], detected = d.target or "us", (d.uk, d.us)
         source = "detected" if d.target else "default"
+        convert = d.target is not None or d.uk + d.us == 0
     if "cache" in v and project.root:
         cache = _inside(project, "cache", v["cache"])
         allowed = project.root
@@ -199,4 +204,4 @@ def resolve(path: Path | None, text: str, flags: dict, project: Project) -> Sett
                     exclude=tuple(v.get("exclude", ())), accept=tuple(accept),
                     cache=cache,
                     project=project.source, off=off, note=note,
-                    target_source=source, detected=detected)
+                    target_source=source, detected=detected, variety_conversion=convert)

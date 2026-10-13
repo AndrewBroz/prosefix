@@ -61,11 +61,12 @@ The endpoint comes from flags, `PROSEFIX_LLM_*` / `ADJUDICATE_LLM_*` environment
 
 ### Which English
 
-When nothing sets the variety (no `--target`, no project `target`, no front matter `prosefix: {target: …}` or `lang:`), prosefix reads the note and keeps the variety it is already written in. It counts the distinct words that only one variety spells that way (`colour`, `programme`, `finalise` against `color`, `program`, `finalize`), outside code and quotations; names, words in your accept lists and words both varieties accept do not count. Two or more British words, and at least twice as many as American ones, mean UK; the same the other way means US. Anything else falls back to US and says so:
+When nothing sets the variety (no `--target`, no project `target`, no front matter `prosefix: {target: …}` or `lang:`), prosefix reads the note and keeps the variety it is already written in. It counts the distinct words that only one variety spells that way (`colour`, `programme`, `finalise` against `color`, `program`, `finalize`), outside code and quotations; names, words in your accept lists and words both varieties accept do not count. Two or more British words, and at least twice as many as American ones, mean UK; the same the other way means US. A note with words of both varieties but no clear majority keeps its spellings as written (no variety conversion; everything else follows the US default), and a note with no such words at all uses US. The per-file line says which:
 
 ```text
 prosefix: draft.md: en-GB (detected) · 6 change(s), 4 for review
-prosefix: draft.md: no clear variety (1 UK, 1 US words); using en-US — set --target or lang: · 1 change(s), 0 for review
+prosefix: draft.md: no clear variety (1 UK, 1 US words); variety spellings left alone — set --target or lang: · 1 change(s), 0 for review
+prosefix: notes.md: no clear variety (0 UK, 0 US words); using en-US — set --target or lang: · 1 change(s), 0 for review
 ```
 
 Each file is decided on its own, so a mixed vault keeps every note consistent. To choose instead, pass `--target uk` (or `us`), set `target` in the project file, or put `lang: en-GB` in a note's front matter.
@@ -150,7 +151,7 @@ The tiers are `variety`, `guide`, `ambiguous`, `numbers`, `serial-comma`, `abbre
 
 ## JSON
 
-`prosefix --json` prints one document, `"schema": 1`, for editors and plugins: the endpoint, the capabilities skipped, and for each file its status, settings (with `target_source`, one of `flag`, `front matter`, `lang`, `project`, `detected` or `default`, and `detected` word counts when detection ran), a list of changes (`id`, `pass`, `check`, `start`, `end`, `line`, `before`, `after`, `reason`, `decided_by`, `confidence`, `depends_on`), review items and the full output. Offsets are UTF-16 code units into the whole original file; `line` is 1-based. A change that lists `depends_on` supersedes the changes it names. The details are in the man page (`man prosefix`, or `man/prosefix.1` in the source).
+`prosefix --json` prints one document, `"schema": 1`, for editors and plugins: the endpoint, the capabilities skipped, and for each file its status, settings (with `target_source`, one of `flag`, `front matter`, `lang`, `project`, `detected` or `default`, and `detected` word counts when detection ran, and `"variety_conversion": false` when no clear variety meant the variety spellings were left alone), a list of changes (`id`, `pass`, `check`, `start`, `end`, `line`, `before`, `after`, `reason`, `decided_by`, `confidence`, `depends_on`), review items and the full output. Offsets are UTF-16 code units into the whole original file; `line` is 1-based. A change that lists `depends_on` supersedes the changes it names. The details are in the man page (`man prosefix`, or `man/prosefix.1` in the source).
 
 ## License
 

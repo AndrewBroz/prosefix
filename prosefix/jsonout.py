@@ -20,6 +20,8 @@ def file_entry(r) -> dict:
                           "skip": sorted(s.skip), "target_source": s.target_source}}
     if s.detected is not None:
         entry["settings"]["detected"] = {"uk": s.detected[0], "us": s.detected[1]}
+    if not s.variety_conversion:
+        entry["settings"]["variety_conversion"] = False
     if r.status == "error":
         return entry
     m = utf16_offsets(r.original)

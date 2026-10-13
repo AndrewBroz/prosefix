@@ -450,3 +450,27 @@ def test_single_file_diff_prints_review_lines_to_stderr(tmp_path, capsys):
     assert "review \u2014" in cap.err and "review" not in cap.out
     main([str(p), "--llm", "none", "--target", "us", "--diff", "-q"])
     assert "review \u2014" not in capsys.readouterr().err
+
+
+def test_undecided_variety_note_and_json(tmp_path, capsys):
+    p = tmp_path / "n.md"
+    p.write_text("The colour and the flavor -- ok.\n")
+    main([str(p), "--llm", "none"])
+    out = capsys.readouterr().out
+    assert ("no clear variety (1 UK, 1 US words); variety spellings left alone "
+            "— set --target or lang:") in out
+    assert "colour" in p.read_text()
+    p.write_text("The colour and the flavor -- ok.\n")
+    main([str(p), "--json", "--llm", "none"])
+    s = json.loads(capsys.readouterr().out)["files"][0]["settings"]
+    assert s["variety_conversion"] is False and s["target_source"] == "default"
+
+
+def test_no_evidence_keeps_using_en_us_note(tmp_path, capsys):
+    p = tmp_path / "n.md"
+    p.write_text("Plain words -- only.\n")
+    main([str(p), "--llm", "none"])
+    assert "no clear variety (0 UK, 0 US words); using en-US" in capsys.readouterr().out
+    p.write_text("Plain words -- only.\n")
+    main([str(p), "--json", "--llm", "none"])
+    assert "variety_conversion" not in json.loads(capsys.readouterr().out)["files"][0]["settings"]

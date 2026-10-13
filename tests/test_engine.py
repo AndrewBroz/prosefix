@@ -404,3 +404,27 @@ def test_server_killed_when_interrupted_while_stopping(tmp_path, monkeypatch):
             break
         time.sleep(0.1)
     assert not _alive(pids[0])
+
+
+def test_undecided_variety_skips_stylefix_variety_tiers(monkeypatch):
+    seen = []
+    real = engine.style.fix
+
+    def spy(text, opts, ep, cache):
+        seen.append(opts.skip)
+        return real(text, opts, ep, cache)
+    monkeypatch.setattr(engine.style, "fix", spy)
+    run("The colour and the flavor.\n", target="us", variety_conversion=False)
+    assert seen and all({"variety", "ambiguous"} <= s for s in seen)
+    seen.clear()
+    run("The colour and the flavor.\n", target="us")
+    assert seen and not any({"variety", "ambiguous"} & s for s in seen)
+
+
+@pytest.mark.skipif(not shutil.which("vale"), reason="variety spelling needs vale")
+def test_undecided_variety_leaves_both_spellings():
+    text = "The colour and the flavor. The theatre is open.\n"
+    r = run(text, target="us", variety_conversion=False)
+    assert "colour" in r.output and "theatre" in r.output
+    assert not [i for i in r.review if "Variant" in i.check]
+    assert "color" in run(text, target="us").output

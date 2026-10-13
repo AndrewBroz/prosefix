@@ -270,13 +270,17 @@ variety spells that way (colour, programme against color, program).
 Capitalised words, words in the accept lists and words both varieties accept
 do not count, and a word counts once however often it appears. Two or more
 UK words and at least twice as many UK as US words mean UK; two or more US
-words and at least twice as many US as UK words mean US. Otherwise the target is US. The
-per-file line says which:
+words and at least twice as many US as UK words mean US. Words of both
+varieties without such a majority leave the variety spellings as written: the
+spelling conversion is skipped for that note (everything else follows the US
+default). With no such words at all, the target is US. The per-file line
+says which:
 .PP
 .RS
 .nf
 prosefix: draft.md: en\-GB (detected) \(pc 6 change(s), 4 for review
-prosefix: draft.md: no clear variety (1 UK, 1 US words); using en\-US \(em set \-\-target or lang: \(pc 1 change(s), 0 for review
+prosefix: draft.md: no clear variety (1 UK, 1 US words); variety spellings left alone \(em set \-\-target or lang: \(pc 1 change(s), 0 for review
+prosefix: notes.md: no clear variety (0 UK, 0 US words); using en\-US \(em set \-\-target or lang: \(pc 1 change(s), 0 for review
 .fi
 .RE
 .PP
@@ -509,7 +513,9 @@ and
 .B target_source
 (flag, front matter, lang, project, detected or default), plus
 \fBdetected\fR ({"uk": \fIn\fR, "us": \fIm\fR})
-when the note's spelling was counted.
+when the note's spelling was counted, and
+.B variety_conversion
+(false) when no clear variety meant the variety spellings were left alone.
 Each change has
 .BR id " (s1... for stylefix, p1... for proofix),"
 .BR pass ,
