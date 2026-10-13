@@ -269,6 +269,10 @@ def _shown_review(r):
 
 
 def _tip(path: str) -> None:
+    try:
+        _user_cache_dir().mkdir(parents=True, exist_ok=True)      # empty: this is what remembers the tip
+    except OSError:
+        pass
     print(f"tip: prosefix --diff {path} shows changes without writing them", file=sys.stderr)
 
 
@@ -282,14 +286,8 @@ def _variety_note(s) -> str:
     return ""
 
 
-def _no_cache_yet(job: Job, flags) -> bool:
-    """True when the cache file that applies to this input does not exist yet."""
-    try:
-        text = job.path.read_text(encoding="utf-8")
-        cache = resolve(job.lookup, text, flags, find_project(job.lookup)).cache
-    except (OSError, UnicodeDecodeError, SettingsError):
-        return False
-    return cache is not None and not cache.exists()
+def _user_cache_dir() -> Path:
+    return Path(os.environ.get("XDG_CACHE_HOME") or Path.home() / ".cache") / "prosefix"
 
 
 def main(argv=None) -> int:
@@ -393,7 +391,7 @@ def main(argv=None) -> int:
     first_run = False
     if not (args.quiet or args.json or args.diff or args.check or args.output) and jobs \
             and all(j.path is not None for j in jobs):
-        first_run = _no_cache_yet(jobs[0], flags)
+        first_run = not _user_cache_dir().exists()
 
     try:
         with ThreadPoolExecutor(max_workers=max(1, args.jobs)) as pool:
@@ -467,6 +465,9 @@ def main(argv=None) -> int:
     elif args.diff:
         for r in changed:
             sys.stdout.writelines(_unified_diff(r.original, r.output, r.path))
+        if len(jobs) == 1 and not (args.quiet or args.changes):
+            for i in _shown_review(results[0]):
+                print(_review_line(results[0].path, i), file=sys.stderr)
     elif args.check:
         flagged = [r for r in results if r.status == "changed" or (args.strict and r.review)]
         for r in flagged:

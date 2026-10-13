@@ -427,3 +427,26 @@ def test_help_opens_plainly(capsys):
         main(["--help"])
     head = capsys.readouterr().out.split("\n\n")[1]
     assert head.startswith("prosefix fixes spelling, style, typos and punctuation in Markdown files, in place.")
+
+
+def test_tip_once_with_llm_none_and_fresh_cache_home(tmp_path, capsys, monkeypatch):
+    home = tmp_path / "cachehome"
+    monkeypatch.setenv("XDG_CACHE_HOME", str(home))
+    p = tmp_path / "n.md"
+    p.write_text("The color -- here.\n")
+    main([str(p), "--llm", "none"])
+    assert "tip: prosefix --diff" in capsys.readouterr().err
+    assert (home / "prosefix").is_dir() and not list((home / "prosefix").iterdir())
+    p.write_text("The color -- here.\n")
+    main([str(p), "--llm", "none"])
+    assert "tip:" not in capsys.readouterr().err
+
+
+def test_single_file_diff_prints_review_lines_to_stderr(tmp_path, capsys):
+    p = tmp_path / "n.md"
+    p.write_text("I had had enough of it.\n")
+    main([str(p), "--llm", "none", "--target", "us", "--diff"])
+    cap = capsys.readouterr()
+    assert "review \u2014" in cap.err and "review" not in cap.out
+    main([str(p), "--llm", "none", "--target", "us", "--diff", "-q"])
+    assert "review \u2014" not in capsys.readouterr().err
