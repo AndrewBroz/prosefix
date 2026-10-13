@@ -102,8 +102,9 @@ class LanguageToolRunner:
     """One languagetool-server for the whole run, shared by every worker.
 
     Started on the first file that will ask LanguageTool, at most once (under a lock).
-    If it cannot start, `warn` gets the fallback line once and every file uses the
-    command line. close() stops it; the CLI calls it however the run ends."""
+    If it cannot start, or stops answering later, `warn` gets one line and every file
+    from then on uses the command line. close() stops it; the CLI calls it however the
+    run ends."""
 
     def __init__(self, warn):
         self._warn = warn
@@ -131,10 +132,20 @@ class LanguageToolRunner:
                     return None
                 try:
                     self._server = self._stack.enter_context(proof_lt.LanguageToolServer())
-                except proof_lt.LTError as e:
+                except (proof_lt.LTError, OSError) as e:      # OSError: it cannot even be executed
                     self._given_up = True
                     self._warn(f"LanguageTool server did not start ({e}); using the command line")
             return self._server
+
+    def lost(self, server, error: Exception) -> None:
+        """`server` failed a check after it had started: stop it, say so once, and use
+        the command line from now on. Workers still using it fail and retry too."""
+        with self._lock:
+            if self._server is not server:              # another worker already reported it
+                return
+            self._server, self._given_up = None, True
+            self._warn(f"LanguageTool server stopped ({error}); using the command line")
+            self._stack.close()
 
     def close(self) -> None:
         with self._lock:
@@ -195,13 +206,19 @@ def process(label: str, text: str, settings: Settings, endpoint, caches: Caches,
         review, skipped = review + r.review, skipped + r.skipped
     final, second = middle, []
     if "proof" in settings.only:
-        r2 = proof.fix(middle, proof.Options(target=settings.target, accept=frozenset(proof_accept),
-                                             style=settings.style or "none", parallel=parallel,
-                                             skip=settings.skip & frozenset(PROOF_TIERS),
-                                             replay_cache=replay,
-                                             oxford_ize=False),   # uk means -ise in every guide
-                       endpoint, caches.cache, caches.commas,
-                       lt_server=lt.server(settings) if lt is not None else None)
+        proof_opts = proof.Options(target=settings.target, accept=frozenset(proof_accept),
+                                   style=settings.style or "none", parallel=parallel,
+                                   skip=settings.skip & frozenset(PROOF_TIERS),
+                                   replay_cache=replay,
+                                   oxford_ize=False)      # uk means -ise in every guide
+        server = lt.server(settings) if lt is not None else None
+        try:
+            r2 = proof.fix(middle, proof_opts, endpoint, caches.cache, caches.commas, lt_server=server)
+        except proof_lt.LTError as e:
+            if server is None:
+                raise
+            lt.lost(server, e)                 # the server died mid-run: this file again, by command line
+            r2 = proof.fix(middle, proof_opts, endpoint, caches.cache, caches.commas)
         final, second = r2.text, r2.changes
         review += r2.review
         skipped += r2.skipped

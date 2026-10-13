@@ -95,7 +95,7 @@ Directory walks take `*.md` and `*.markdown`, skipping `.git`, `.obsidian`, `nod
 
 Writes are atomic, keep the file's mode, and follow symlinks to their target; read-only files are reported and left alone.
 
-With LanguageTool installed, prosefix starts one local LanguageTool server for the run (on 127.0.0.1 only), shares it between files and stops it when the run ends, including on errors and Ctrl-C. If it cannot start, prosefix says so in one line and uses the command line.
+With LanguageTool installed, prosefix starts one local LanguageTool server for the run (on 127.0.0.1 only), shares it between files and stops it when the run ends, including on errors and Ctrl-C. If it cannot start, or stops answering mid-run, prosefix says so in one line and uses the command line for the rest of the run. Ctrl-C stops it, saves the decisions already made, prints `prosefix: interrupted` and exits 130.
 
 ## Obsidian
 

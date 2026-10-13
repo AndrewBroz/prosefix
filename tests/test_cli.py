@@ -304,8 +304,8 @@ def test_decisions_are_saved_when_the_run_is_interrupted(tmp_path):
         caches.cache.data["k"] = {"word": "color", "choice": "colour"}     # a paid decision
         raise KeyboardInterrupt
     import unittest.mock
-    with unittest.mock.patch.object(engine, "process", process), pytest.raises(KeyboardInterrupt):
-        main([str(p), "--llm", "cached"])
+    with unittest.mock.patch.object(engine, "process", process):
+        assert main([str(p), "--llm", "cached"]) == 130
     assert json.loads((tmp_path / ".prosefix" / "cache.json").read_text()) == {
         "k": {"word": "color", "choice": "colour"}}
 

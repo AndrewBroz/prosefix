@@ -174,6 +174,7 @@ def test_second_run_over_the_example_vault_changes_nothing(tmp_path, target):
 # One LanguageTool server per run --------------------------------------------------------
 
 import os
+import signal
 import time
 
 import proofix.lt
@@ -246,14 +247,94 @@ def test_server_stopped_after_exception(tmp_path, monkeypatch):
 
 
 @needs_server
-def test_server_stopped_on_ctrl_c(tmp_path, monkeypatch):
+def test_server_stopped_on_ctrl_c(tmp_path, monkeypatch, capsys):
     pids = _record_servers(monkeypatch)
     for i in range(6):
         (tmp_path / f"{i}.md").write_text("We recieved the scheme.\n")
     _raise_on_call(monkeypatch, engine, "process", 2, KeyboardInterrupt())
-    with pytest.raises(KeyboardInterrupt):
-        main([str(tmp_path), "--llm", "none", "--target", "us", "-j", "2"])
+    assert main([str(tmp_path), "--llm", "none", "--target", "us", "-j", "2"]) == 130
     assert pids and not any(_alive(p) for p in pids)
+    err = capsys.readouterr().err
+    assert err.endswith("prosefix: interrupted\n") and "Traceback" not in err
+
+
+@needs_server
+def test_real_sigint_exits_130_without_traceback(tmp_path):
+    import signal
+    import subprocess
+    import sys
+    for i in range(12):
+        (tmp_path / f"{i}.md").write_text(DRAFT_FOR_SIGINT)
+    env = dict(os.environ, XDG_CONFIG_HOME=str(tmp_path / "c"), XDG_CACHE_HOME=str(tmp_path / "k"))
+    proc = subprocess.Popen([sys.executable, "-c", "import sys; from prosefix.cli import main; sys.exit(main())",
+                             str(tmp_path), "--llm", "none", "--check", "-j", "1"],
+                            env=env, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True,
+                            start_new_session=True)
+    child = None
+    for _ in range(600):                     # until prosefix has started its server
+        found = subprocess.run(["pgrep", "-P", str(proc.pid)], capture_output=True, text=True).stdout.split()
+        if found:
+            child = int(found[0])
+            break
+        time.sleep(0.05)
+    assert child, "no server started"
+    time.sleep(1)
+    proc.send_signal(signal.SIGINT)
+    out, err = proc.communicate(timeout=60)
+    assert proc.returncode == 130, err
+    assert "Traceback" not in err and err.endswith("prosefix: interrupted\n")
+    assert not _alive(child)
+
+
+DRAFT_FOR_SIGINT = "We recieved the the new colour scheme -- it looks great.\n" * 20
+
+
+@needs_server
+def test_server_that_cannot_be_executed_falls_back(tmp_path, monkeypatch, capsys):
+    bad = tmp_path / "bin"
+    bad.mkdir()
+    exe = bad / "languagetool-server"
+    exe.write_text("#!/nonexistent/sh\n")
+    exe.chmod(0o755)
+    monkeypatch.setenv("PATH", f"{bad}{os.pathsep}{os.environ['PATH']}")
+    notes = tmp_path / "notes"
+    notes.mkdir()
+    for i in range(3):
+        (notes / f"{i}.md").write_text("We recieved the the scheme.\n")
+    assert main([str(notes), "--llm", "none", "--target", "us"]) == 0
+    err = capsys.readouterr().err
+    assert err.count("prosefix: LanguageTool server did not start (") == 1
+    assert "; using the command line" in err
+    assert all((notes / f"{i}.md").read_text() == "We received the scheme.\n" for i in range(3))
+
+
+@needs_server
+def test_server_dying_mid_run_falls_back(tmp_path, monkeypatch, capsys):
+    servers = []
+    real = proofix.lt.LanguageToolServer.__enter__
+
+    def enter(self):
+        out = real(self)
+        servers.append(self)
+        return out
+    monkeypatch.setattr(proofix.lt.LanguageToolServer, "__enter__", enter)
+    real_resolve, calls = cli.resolve, []
+
+    def resolve(*a, **kw):                   # before the second file: the server dies
+        calls.append(1)
+        if len(calls) == 2:
+            os.killpg(servers[0].process.pid, signal.SIGKILL)
+            servers[0].process.wait()
+        return real_resolve(*a, **kw)
+    monkeypatch.setattr(cli, "resolve", resolve)
+    for i in range(3):
+        (tmp_path / f"{i}.md").write_text("We recieved the the scheme.\n")
+    assert main([str(tmp_path), "--llm", "none", "--target", "us", "-j", "1"]) == 0
+    err = capsys.readouterr().err
+    assert err.count("prosefix: LanguageTool server stopped (") == 1, err
+    assert "; using the command line" in err and "LTError" not in err
+    assert len(servers) == 1
+    assert all((tmp_path / f"{i}.md").read_text() == "We received the scheme.\n" for i in range(3))
 
 
 def test_server_fallback_message(tmp_path, monkeypatch, capsys):
@@ -316,8 +397,7 @@ def test_server_killed_when_interrupted_while_stopping(tmp_path, monkeypatch):
         raise KeyboardInterrupt
     monkeypatch.setattr(proofix.lt.LanguageToolServer, "__exit__", interrupted)
     (tmp_path / "n.md").write_text("We recieved the scheme.\n")
-    with pytest.raises(KeyboardInterrupt):
-        main([str(tmp_path / "n.md"), "--llm", "none", "--target", "us"])
+    assert main([str(tmp_path / "n.md"), "--llm", "none", "--target", "us"]) == 130
     assert pids
     for _ in range(50):
         if not _alive(pids[0]):

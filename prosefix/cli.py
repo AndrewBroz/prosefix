@@ -291,6 +291,14 @@ def _user_cache_dir() -> Path:
 
 
 def main(argv=None) -> int:
+    try:
+        return _main(argv)
+    except KeyboardInterrupt:          # the server is stopped and the caches saved by now
+        print("prosefix: interrupted", file=sys.stderr)
+        return 130
+
+
+def _main(argv=None) -> int:
     global _UMASK
     _UMASK = _read_umask()
     parser = build_parser()
@@ -402,11 +410,13 @@ def main(argv=None) -> int:
             except BaseException:     # Ctrl-C or a crash: files not yet started are not started
                 pool.shutdown(wait=False, cancel_futures=True)
                 raise
-    finally:                          # decisions already paid for survive Ctrl-C or a crash,
-        runner.close()                # and the LanguageTool server never outlives the run
-        if mode != "off":
-            for msg in engine.flush_all():
-                _err(msg)
+    finally:                          # the LanguageTool server never outlives the run, and
+        try:                          # decisions already paid for survive Ctrl-C or a crash
+            runner.close()
+        finally:
+            if mode != "off":
+                for msg in engine.flush_all():
+                    _err(msg)
     for r in results:
         if r.status == "error":
             failed = True

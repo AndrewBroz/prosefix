@@ -589,7 +589,11 @@ on a free port on 127.0.0.1 only, shares it between all files, and stops it
 when the run ends, including on errors and Ctrl\-C. If it does not start
 within 30 seconds, prosefix prints
 .I "prosefix: LanguageTool server did not start (REASON); using the command line"
-once and carries on. For diagnosis and tests.
+once and carries on. If the server stops answering later in the run, prosefix
+prints
+.I "prosefix: LanguageTool server stopped (REASON); using the command line"
+once, checks that file again through the command line, and uses the command
+line for the rest of the run. For diagnosis and tests.
 .SH FILES
 .TP
 .I ~/.config/prosefix/config.toml
@@ -626,6 +630,12 @@ A usage, configuration or input error, a failed write, a file that changed
 on disk while prosefix ran (it is left alone), or a
 .B \-\-require
 failure. This wins over 1.
+.TP
+.B 130
+Interrupted (Ctrl\-C). prosefix stops the LanguageTool server, saves the
+decisions already made, prints
+.I prosefix: interrupted
+and exits; files not yet written are left as they were.
 .PP
 A missing tool is never an error unless required.
 .SH EXAMPLES
